@@ -217,7 +217,7 @@ def _color(status):
     return 'background-color: #f4c7c3'
 
 st.dataframe(
-    status_df.style.applymap(_color, subset=['Status']),
+    status_df.style.map(_color, subset=['Status']),
     use_container_width=True,
     hide_index=True,
 )
