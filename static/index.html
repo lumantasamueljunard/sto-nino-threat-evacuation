@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SENTINEL — Sto. Niño SHS Safety Command</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>" />
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════
+     SIDEBAR
+════════════════════════════════════════════════════ -->
+<aside id="sidebar">
+
+  <!-- Logo -->
+  <div class="sb-logo">
+    <div style="display:flex; align-items:center; gap:10px;">
+      <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+        <path d="M14 2L3 7v7c0 6.2 4.7 12 11 13.5C20.3 26 25 20.2 25 14V7L14 2z" fill="oklch(52% 0.20 255)" opacity="0.9"/>
+        <path d="M14 5L5 9.5V14c0 5 3.8 9.6 9 11 5.2-1.4 9-6 9-11V9.5L14 5z" fill="white" opacity="0.15"/>
+        <path d="M10 14l2.5 2.5L18 11" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <div>
+        <div class="sb-logo-title">SENTINEL</div>
+        <div class="sb-logo-sub">Campus Safety Command</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Campus Status Badge -->
+  <div class="sb-section" style="padding-top:14px;">
+    <div class="sb-section-label">Overall Campus Status</div>
+    <div class="sb-status-badge normal" id="sb-status-badge">
+      <div class="sb-status-label" id="sb-status-label">ALL CLEAR — Campus Secure</div>
+      <div class="sb-status-sub" id="sb-status-sub">0 active incidents</div>
+    </div>
+  </div>
+
+  <div class="sb-divider"></div>
+
+  <!-- Evacuation Guide -->
+  <div class="sb-section">
+    <div class="sb-section-label">Evacuation Guide</div>
+    <div style="font-size:11px; color:var(--c-sidebar-muted); margin-bottom:8px;">Select your current room:</div>
+    <select class="sb-select" id="sb-room-select">
+      <option value="">Loading rooms…</option>
+    </select>
+    <div id="sb-egress-card" class="egress-card safe">
+      <div class="egress-step">
+        <svg class="egress-icon" viewBox="0 0 24 24" fill="none" stroke="var(--c-green)" stroke-width="2" stroke-linecap="round">
+          <path d="M3 12h18M13 6l6 6-6 6"/>
+        </svg>
+        <span id="egress-door">Select a room above</span>
+      </div>
+      <div class="egress-step">
+        <svg class="egress-icon" viewBox="0 0 24 24" fill="none" stroke="var(--c-green)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 4v16M20 4v16M4 12h16"/>
+        </svg>
+        <span id="egress-path">—</span>
+      </div>
+      <div class="egress-step">
+        <svg class="egress-icon" viewBox="0 0 24 24" fill="none" stroke="var(--c-green)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/>
+        </svg>
+        <span id="egress-gate">—</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="sb-divider"></div>
+
+  <!-- Quick Scenarios -->
+  <div class="sb-section">
+    <div class="sb-section-label">Emergency Drills</div>
+    <select class="sb-select" id="sb-scenario-select">
+      <option value="">Loading…</option>
+    </select>
+  </div>
+
+  <div class="sb-divider"></div>
+
+  <!-- Gate Controls -->
+  <div class="sb-section">
+    <div class="sb-section-label">Gate Controls</div>
+    <div class="gate-toggles">
+      <div class="gate-btn open" id="gate-w-btn" onclick="toggleGate('GATE-W')">
+        West Gate<br><small id="gate-w-status">OPEN</small>
+      </div>
+      <div class="gate-btn open" id="gate-ne-btn" onclick="toggleGate('GATE-NE')">
+        NE Gate<br><small id="gate-ne-status">OPEN</small>
+      </div>
+    </div>
+  </div>
+
+  <div class="sb-divider"></div>
+
+  <!-- Action Buttons -->
+  <div class="sb-section">
+    <button class="sb-btn mqtt" onclick="broadcastMQTT()">
+      📡 Broadcast to ESP32 / Wokwi
+    </button>
+    <button class="sb-btn reset" onclick="resetAll()">
+      ↺ Reset All to Normal
+    </button>
+  </div>
+
+  <div class="sb-spacer"></div>
+
+  <!-- Footer -->
+  <div style="padding:12px 16px; border-top:1px solid var(--c-sidebar-border);">
+    <div style="font-size:10px; color:var(--c-sidebar-muted); line-height:1.5;">
+      Capstone Prototype · Demo only.<br>
+      Authorized personnel take precedence.
+    </div>
+  </div>
+</aside>
+
+<!-- ═══════════════════════════════════════════════════
+     MAIN CONTENT
+════════════════════════════════════════════════════ -->
+<main id="main">
+
+  <!-- Top Bar -->
+  <div id="topbar">
+    <!-- Pill Navigation -->
+    <nav class="pill-nav">
+      <button class="pill-btn active" onclick="switchTab('map')" id="pill-map">
+        🗺 Campus Floor Plan &amp; Evacuation
+      </button>
+      <button class="pill-btn" onclick="switchTab('data')" id="pill-data">
+        📊 School Data &amp; Intelligence
+      </button>
+      <button class="pill-btn" onclick="switchTab('cctv')" id="pill-cctv">
+        📹 CCTV &amp; Device Feeds
+      </button>
+    </nav>
+
+    <span class="topbar-title">Sto. Niño SHS</span>
+
+    <div class="topbar-status" style="margin-left:16px;">
+      <span class="live-dot" id="topbar-dot"></span>
+      <span id="topbar-status-text">ALL CLEAR</span>
+    </div>
+
+    <span class="topbar-time" id="topbar-time">--:--:--</span>
+  </div>
+
+  <!-- Content Area -->
+  <div id="content">
+
+    <!-- ── PILL 1: CAMPUS MAP ── -->
+    <div id="tab-map" class="tab-panel active">
+      <!-- Sub-navigation -->
+      <div class="map-subnav">
+        <button class="map-btn active" onclick="switchMapView('campus')" id="mapbtn-campus">
+          <span class="b-dot" style="background:var(--c-blue);"></span>
+          School Map
+        </button>
+        <button class="map-btn" onclick="switchMapView('b1')" id="mapbtn-b1">
+          <span class="b-dot" id="dot-b1" style="background:var(--c-green);"></span>
+          Building 1
+        </button>
+        <button class="map-btn" onclick="switchMapView('b2')" id="mapbtn-b2">
+          <span class="b-dot" id="dot-b2" style="background:var(--c-green);"></span>
+          Building 2
+        </button>
+        <button class="map-btn" onclick="switchMapView('b3')" id="mapbtn-b3">
+          <span class="b-dot" id="dot-b3" style="background:var(--c-green);"></span>
+          Building 3
+        </button>
+
+        <div class="map-legend">
+          <div class="legend-item">
+            <div class="legend-dot" style="background:var(--c-green);"></div> Safe Route
+          </div>
+          <div class="legend-item">
+            <div class="legend-dot" style="background:#8b5cf6;"></div> Emergency Gate
+          </div>
+          <div class="legend-item">
+            <div class="legend-dot" style="background:var(--c-red);"></div> Blocked
+          </div>
+          <div class="legend-item">
+            <div class="legend-dot" style="background:var(--c-blue);"></div> ESP32 Node
+          </div>
+        </div>
+      </div>
+
+      <!-- CAMPUS OVERVIEW MAP -->
+      <div id="view-campus" class="map-view">
+        <div class="map-container">
+          <div style="position:relative;">
+            <img src="/static/site_plan.jpg" style="width:100%; display:block;" alt="Campus Site Plan" />
+            <svg id="campus-overlay" viewBox="0 0 1024 764" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <marker id="arr-g" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                  <polygon points="0 0, 8 3, 0 6" fill="oklch(55% 0.18 145)" />
+                </marker>
+                <filter id="glow-g">
+                  <feGaussianBlur stdDeviation="3" result="blur"/>
+                  <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+                </filter>
+                <filter id="glow-p">
+                  <feGaussianBlur stdDeviation="4" result="blur"/>
+                  <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+                </filter>
+              </defs>
+
+              <!-- Gate rings (purple) -->
+              <g id="gate-w-ring">
+                <circle cx="100" cy="520" r="36" fill="none" stroke="#8b5cf6" stroke-width="4" stroke-dasharray="7,4" filter="url(#glow-p)">
+                  <animateTransform attributeName="transform" type="rotate" from="0 100 520" to="360 100 520" dur="8s" repeatCount="indefinite"/>
+                </circle>
+                <circle cx="100" cy="520" r="24" fill="oklch(50% 0.20 290 / 20%)" />
+                <text x="100" y="575" text-anchor="middle" fill="white" font-size="11" font-weight="600" font-family="DM Sans, sans-serif">GATE-W</text>
+              </g>
+              <g id="gate-ne-ring">
+                <circle cx="820" cy="110" r="36" fill="none" stroke="#8b5cf6" stroke-width="4" stroke-dasharray="7,4" filter="url(#glow-p)">
+                  <animateTransform attributeName="transform" type="rotate" from="360 820 110" to="0 820 110" dur="8s" repeatCount="indefinite"/>
+                </circle>
+                <circle cx="820" cy="110" r="24" fill="oklch(50% 0.20 290 / 20%)" />
+                <text x="820" y="65" text-anchor="middle" fill="white" font-size="11" font-weight="600" font-family="DM Sans, sans-serif">GATE-NE</text>
+              </g>
+
+              <!-- Pulsing ESP32 beacons on stair exits -->
+              <!-- B1 Left stair -->
+              <g><circle cx="185" cy="430" r="12" fill="oklch(55% 0.18 145)" opacity="0.85"><animate attributeName="r" values="7;16;7" dur="2.2s" repeatCount="indefinite"/><animate attributeName="opacity" values="0.9;0.1;0.9" dur="2.2s" repeatCount="indefinite"/></circle><circle cx="185" cy="430" r="6" fill="white"/></g>
+              <!-- B1 Right stair -->
+              <g><circle cx="740" cy="320" r="12" fill="oklch(55% 0.18 145)" opacity="0.85"><animate attributeName="r" values="7;16;7" dur="2.2s" begin="0.5s" repeatCount="indefinite"/><animate attributeName="opacity" values="0.9;0.1;0.9" dur="2.2s" begin="0.5s" repeatCount="indefinite"/></circle><circle cx="740" cy="320" r="6" fill="white"/></g>
+              <!-- B2 stair -->
+              <g><circle cx="730" cy="540" r="12" fill="oklch(55% 0.18 145)" opacity="0.85"><animate attributeName="r" values="7;16;7" dur="2.2s" begin="1s" repeatCount="indefinite"/><animate attributeName="opacity" values="0.9;0.1;0.9" dur="2.2s" begin="1s" repeatCount="indefinite"/></circle><circle cx="730" cy="540" r="6" fill="white"/></g>
+              <!-- B3 stair -->
+              <g><circle cx="430" cy="600" r="12" fill="oklch(55% 0.18 145)" opacity="0.85"><animate attributeName="r" values="7;16;7" dur="2.2s" begin="1.5s" repeatCount="indefinite"/><animate attributeName="opacity" values="0.9;0.1;0.9" dur="2.2s" begin="1.5s" repeatCount="indefinite"/></circle><circle cx="430" cy="600" r="6" fill="white"/></g>
+
+              <!-- Animated evacuation arrows -->
+              <!-- B1 left -> GATE-W -->
+              <path d="M185 442 C 160 470, 140 490, 118 510" fill="none" stroke="oklch(55% 0.18 145)" stroke-width="4" stroke-dasharray="10,6" filter="url(#glow-g)" marker-end="url(#arr-g)"><animate attributeName="stroke-dashoffset" from="32" to="0" dur="1s" repeatCount="indefinite"/></path>
+              <!-- B1 right -> GATE-NE -->
+              <path d="M740 310 C 760 270, 790 200, 812 128" fill="none" stroke="oklch(55% 0.18 145)" stroke-width="4" stroke-dasharray="10,6" filter="url(#glow-g)" marker-end="url(#arr-g)"><animate attributeName="stroke-dashoffset" from="32" to="0" dur="1s" repeatCount="indefinite"/></path>
+              <!-- B2 -> GATE-NE (around courtyard) -->
+              <path d="M730 528 C 750 480, 760 380, 780 280 C 790 210, 805 160, 815 128" fill="none" stroke="oklch(55% 0.18 145)" stroke-width="4" stroke-dasharray="10,6" filter="url(#glow-g)" marker-end="url(#arr-g)"><animate attributeName="stroke-dashoffset" from="32" to="0" dur="1.2s" repeatCount="indefinite"/></path>
+              <!-- B3 -> GATE-W -->
+              <path d="M430 592 C 360 590, 250 570, 130 530" fill="none" stroke="oklch(55% 0.18 145)" stroke-width="4" stroke-dasharray="10,6" filter="url(#glow-g)" marker-end="url(#arr-g)"><animate attributeName="stroke-dashoffset" from="32" to="0" dur="1s" repeatCount="indefinite"/></path>
+
+              <!-- Building Labels -->
+              <rect x="280" y="285" width="100" height="24" rx="4" fill="oklch(22% 0.04 255 / 80%)"/>
+              <text x="330" y="301" text-anchor="middle" fill="white" font-size="12" font-weight="700" font-family="DM Sans, sans-serif">BUILDING 1</text>
+              <rect x="620" y="400" width="100" height="24" rx="4" fill="oklch(22% 0.04 255 / 80%)"/>
+              <text x="670" y="416" text-anchor="middle" fill="white" font-size="12" font-weight="700" font-family="DM Sans, sans-serif">BUILDING 2</text>
+              <rect x="310" y="540" width="100" height="24" rx="4" fill="oklch(22% 0.04 255 / 80%)"/>
+              <text x="360" y="556" text-anchor="middle" fill="white" font-size="12" font-weight="700" font-family="DM Sans, sans-serif">BUILDING 3</text>
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <!-- BUILDING DETAIL VIEWS -->
+      <div id="view-building" class="map-view" style="display:none;">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+          <div>
+            <h2 class="section-title" id="bld-view-title">Building 1</h2>
+            <p class="section-sub" id="bld-view-sub">4 Floors · 5 Rooms per floor · ESP32 nodes at stairwells</p>
+          </div>
+          <div id="bld-view-badge" class="badge safe">🟢 All Floors Safe</div>
+        </div>
+        <div class="floor-grid" id="floor-grid">
+          <!-- Dynamically filled by JS -->
+        </div>
+      </div>
+    </div>
+
+    <!-- ── PILL 2: SCHOOL DATA ── -->
+    <div id="tab-data" class="tab-panel">
+      <h2 class="section-title">Campus Intelligence &amp; System Metrics</h2>
+      <p class="section-sub">Live snapshot — auto-updates every 5 seconds.</p>
+
+      <!-- Metric Cards -->
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-label">Total Classrooms</div>
+          <div class="metric-value blue">36</div>
+          <div class="metric-sub">Across 10 floor levels</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Safe &amp; Accessible</div>
+          <div class="metric-value green" id="m-safe">—</div>
+          <div class="metric-sub">Direct egress open</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Shelter in Place</div>
+          <div class="metric-value amber" id="m-hold">—</div>
+          <div class="metric-sub">Corridor hazard nearby</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Blocked / No Route</div>
+          <div class="metric-value red" id="m-blocked">—</div>
+          <div class="metric-sub">All exits cut off</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Active Incidents</div>
+          <div class="metric-value blue" id="m-incidents">—</div>
+          <div class="metric-sub">Deduplicated events</div>
+        </div>
+      </div>
+
+      <!-- Building Summary -->
+      <div class="building-cards">
+        <div class="building-card">
+          <div class="building-card-name">Building 1</div>
+          <div class="building-card-sub">4 Floors · 20 Classrooms</div>
+          <div class="building-stat"><span>Stair columns</span><span>2 (Left &amp; Right)</span></div>
+          <div class="building-stat"><span>ESP32 nodes</span><span>8 (2 per floor)</span></div>
+          <div class="building-stat"><span>Indoor cameras</span><span>8 devices</span></div>
+          <div style="margin-top:8px;" id="b1-badge"><span class="badge safe">🟢 Normal</span></div>
+        </div>
+        <div class="building-card">
+          <div class="building-card-name">Building 2</div>
+          <div class="building-card-sub">4 Floors · 12 Classrooms</div>
+          <div class="building-stat"><span>Stair columns</span><span>2 (Left &amp; Right)</span></div>
+          <div class="building-stat"><span>ESP32 nodes</span><span>8 (2 per floor)</span></div>
+          <div class="building-stat"><span>Indoor cameras</span><span>8 devices</span></div>
+          <div style="margin-top:8px;" id="b2-badge"><span class="badge safe">🟢 Normal</span></div>
+        </div>
+        <div class="building-card">
+          <div class="building-card-name">Building 3</div>
+          <div class="building-card-sub">2 Floors · 4 Classrooms</div>
+          <div class="building-stat"><span>Stair columns</span><span>2 (Left &amp; Right)</span></div>
+          <div class="building-stat"><span>ESP32 nodes</span><span>4 (2 per floor)</span></div>
+          <div class="building-stat"><span>Indoor cameras</span><span>4 devices</span></div>
+          <div style="margin-top:8px;" id="b3-badge"><span class="badge safe">🟢 Normal</span></div>
+        </div>
+      </div>
+
+      <!-- Gate Status & Incident Log row -->
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:20px;">
+        <div class="data-card">
+          <div class="data-card-header">
+            <span class="data-card-title">Emergency Gates</span>
+          </div>
+          <div style="padding:14px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid var(--c-border-light);">
+              <span style="font-size:13px; font-weight:600; color:var(--c-text);">West Gate (GATE-W)</span>
+              <span class="badge safe" id="d-gate-w">🟢 OPEN</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0;">
+              <span style="font-size:13px; font-weight:600; color:var(--c-text);">Northeast Gate (GATE-NE)</span>
+              <span class="badge safe" id="d-gate-ne">🟢 OPEN</span>
+            </div>
+          </div>
+        </div>
+        <div class="data-card">
+          <div class="data-card-header">
+            <span class="data-card-title">Active Incident Events</span>
+          </div>
+          <div style="padding:14px;" id="event-log">
+            <div class="empty-state">
+              <p>No active incidents. Campus status normal.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Full Classroom Table -->
+      <div class="data-card">
+        <div class="data-card-header">
+          <span class="data-card-title">All 36 Classrooms — Egress Status</span>
+          <span class="badge safe" id="table-status-badge">All Clear</span>
+        </div>
+        <div style="overflow-x:auto; max-height:380px; overflow-y:auto;">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Classroom</th>
+                <th>Safety Status</th>
+                <th>Assigned Gate</th>
+                <th>Exit Door</th>
+                <th>Path Steps</th>
+              </tr>
+            </thead>
+            <tbody id="rooms-table-body">
+              <tr><td colspan="5" style="text-align:center; color:var(--c-muted); padding:20px;">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── PILL 3: CCTV FEEDS ── -->
+    <div id="tab-cctv" class="tab-panel">
+      <h2 class="section-title">CCTV &amp; Simulated Edge Device Feeds</h2>
+      <p class="section-sub">26 campus devices — 6 outdoor perimeter + 20 indoor camera nodes.</p>
+
+      <!-- Camera group filter -->
+      <div class="cam-filter-bar">
+        <button class="cam-filter-btn active" onclick="filterCams('outside')"  id="camf-outside">Outside Perimeter (6)</button>
+        <button class="cam-filter-btn"         onclick="filterCams('b1')"      id="camf-b1">Building 1 (8)</button>
+        <button class="cam-filter-btn"         onclick="filterCams('b2')"      id="camf-b2">Building 2 (8)</button>
+        <button class="cam-filter-btn"         onclick="filterCams('b3')"      id="camf-b3">Building 3 (4)</button>
+      </div>
+
+      <div class="cam-grid" id="cam-grid">
+        <div style="text-align:center; padding:40px; color:var(--c-muted);">Loading camera feeds…</div>
+      </div>
+    </div>
+
+  </div><!-- #content -->
+</main>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
