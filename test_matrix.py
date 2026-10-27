@@ -154,40 +154,40 @@ check('High index but unverified -> verified = False', c['verified'] is False)
 # 6. Single indoor CRITICAL
 # ===========================================================================
 print('\n== 6. Single indoor CRITICAL ==')
-obs1 = [Observation('e1', 'B1-F1-CAM-L', 'CRITICAL', 2, incident_id='inc-1')]
+obs1 = [Observation('e1', 'TPB-F1-CAM-L', 'CRITICAL', 2, incident_id='inc-1')]
 s1 = assess(obs1)
 check('1 event recorded', s1['observation_count'] == 1)
 check('Raw detection count = 2', s1['raw_detection_count'] == 2)
 check('Known incident count = 1', s1['known_incident_count'] == 1)
 check('unique_threat_count is None (caveat preserved)',
       s1['unique_threat_count'] is None)
-check('Covered room B1-F1-R1 -> NO_CONFIRMED_ROUTE',
-      route('B1-F1-R1', s1)['status'] == 'NO_CONFIRMED_ROUTE')
-check('Covered room B1-F1-R3 -> NO_CONFIRMED_ROUTE',
-      route('B1-F1-R3', s1)['status'] == 'NO_CONFIRMED_ROUTE')
-check('Uncovered room on same floor B1-F1-R5 -> NO_CONFIRMED_ROUTE (corridor blocked)',
-      route('B1-F1-R5', s1)['status'] == 'NO_CONFIRMED_ROUTE')
-check('Upper floor B1-F4-R3 -> HOLD_FOR_AUTHORIZED_GUIDANCE',
-      route('B1-F4-R3', s1)['status'] == 'HOLD_FOR_AUTHORIZED_GUIDANCE')
-check('Different building B2-F4-R2 -> route available',
-      route('B2-F4-R2', s1)['status'] == 'MODELED_ROUTE_AVAILABLE')
+check('Covered room TPB-F1-R1 -> NO_CONFIRMED_ROUTE',
+      route('TPB-F1-R1', s1)['status'] == 'NO_CONFIRMED_ROUTE')
+check('Covered room TPB-F1-R3 -> NO_CONFIRMED_ROUTE',
+      route('TPB-F1-R3', s1)['status'] == 'NO_CONFIRMED_ROUTE')
+check('Uncovered room on same floor TPB-F1-R5 -> NO_CONFIRMED_ROUTE (corridor blocked)',
+      route('TPB-F1-R5', s1)['status'] == 'NO_CONFIRMED_ROUTE')
+check('Upper floor TPB-F4-R3 -> HOLD_FOR_AUTHORIZED_GUIDANCE',
+      route('TPB-F4-R3', s1)['status'] == 'HOLD_FOR_AUTHORIZED_GUIDANCE')
+check('Different building AB-F4-R2 -> route available',
+      route('AB-F4-R2', s1)['status'] == 'MODELED_ROUTE_AVAILABLE')
 
 
 # ===========================================================================
 # 7. Uncertain location (device observation without confirmed room)
 # ===========================================================================
 print('\n== 7. Uncertain location ==')
-obs2 = [Observation('e1', 'B1-F2-CAM-L', 'CRITICAL', 1)]
+obs2 = [Observation('e1', 'TPB-F2-CAM-L', 'CRITICAL', 1)]
 s2 = assess(obs2)
 check('All covered rooms -> NO_CONFIRMED_ROUTE',
       all(route(r, s2)['status'] == 'NO_CONFIRMED_ROUTE'
-          for r in ['B1-F2-R1', 'B1-F2-R2', 'B1-F2-R3']))
-check('Floor below (B1-F1-R1) still route-able',
-      route('B1-F1-R1', s2)['status'] == 'MODELED_ROUTE_AVAILABLE')
-check('Floor above (B1-F3-R1) -> HOLD_FOR_AUTHORIZED_GUIDANCE',
-      route('B1-F3-R1', s2)['status'] == 'HOLD_FOR_AUTHORIZED_GUIDANCE')
-check('Top floor (B1-F4-R1) -> HOLD_FOR_AUTHORIZED_GUIDANCE',
-      route('B1-F4-R1', s2)['status'] == 'HOLD_FOR_AUTHORIZED_GUIDANCE')
+          for r in ['TPB-F2-R1', 'TPB-F2-R2', 'TPB-F2-R3']))
+check('Floor below (TPB-F1-R1) still route-able',
+      route('TPB-F1-R1', s2)['status'] == 'MODELED_ROUTE_AVAILABLE')
+check('Floor above (TPB-F3-R1) -> HOLD_FOR_AUTHORIZED_GUIDANCE',
+      route('TPB-F3-R1', s2)['status'] == 'HOLD_FOR_AUTHORIZED_GUIDANCE')
+check('Top floor (TPB-F4-R1) -> HOLD_FOR_AUTHORIZED_GUIDANCE',
+      route('TPB-F4-R1', s2)['status'] == 'HOLD_FOR_AUTHORIZED_GUIDANCE')
 
 
 # ===========================================================================
@@ -195,18 +195,18 @@ check('Top floor (B1-F4-R1) -> HOLD_FOR_AUTHORIZED_GUIDANCE',
 # ===========================================================================
 print('\n== 8. Simultaneous threats ==')
 obs3 = [
-    Observation('e1', 'B1-F2-CAM-L', 'CRITICAL', 1, incident_id='inc-A'),
-    Observation('e2', 'B3-F1-CAM-R', 'CRITICAL', 1, incident_id='inc-B'),
+    Observation('e1', 'TPB-F2-CAM-L', 'CRITICAL', 1, incident_id='inc-A'),
+    Observation('e2', 'LB-F1-CAM-R', 'CRITICAL', 1, incident_id='inc-B'),
 ]
 s3 = assess(obs3)
 check('2 events recorded', s3['observation_count'] == 2)
 check('2 known incidents', s3['known_incident_count'] == 2)
-check('B2-F4-R2 unaffected -> route available',
-      route('B2-F4-R2', s3)['status'] == 'MODELED_ROUTE_AVAILABLE')
-check('B1-F1-R1 (below B1-F2) -> route available',
-      route('B1-F1-R1', s3)['status'] == 'MODELED_ROUTE_AVAILABLE')
-check('B1-F4-R3 (above B1-F2) -> HOLD_FOR_AUTHORIZED_GUIDANCE',
-      route('B1-F4-R3', s3)['status'] == 'HOLD_FOR_AUTHORIZED_GUIDANCE')
+check('AB-F4-R2 unaffected -> route available',
+      route('AB-F4-R2', s3)['status'] == 'MODELED_ROUTE_AVAILABLE')
+check('TPB-F1-R1 (below TPB-F2) -> route available',
+      route('TPB-F1-R1', s3)['status'] == 'MODELED_ROUTE_AVAILABLE')
+check('TPB-F4-R3 (above TPB-F2) -> HOLD_FOR_AUTHORIZED_GUIDANCE',
+      route('TPB-F4-R3', s3)['status'] == 'HOLD_FOR_AUTHORIZED_GUIDANCE')
 
 
 # ===========================================================================
@@ -214,8 +214,8 @@ check('B1-F4-R3 (above B1-F2) -> HOLD_FOR_AUTHORIZED_GUIDANCE',
 # ===========================================================================
 print('\n== 9. Overlapping camera observations ==')
 obs4 = [
-    Observation('e1', 'B1-F1-CAM-L', 'CRITICAL', 2, incident_id='inc-1'),
-    Observation('e2', 'B1-F1-CAM-R', 'CRITICAL', 1, incident_id='inc-1'),
+    Observation('e1', 'TPB-F1-CAM-L', 'CRITICAL', 2, incident_id='inc-1'),
+    Observation('e2', 'TPB-F1-CAM-R', 'CRITICAL', 1, incident_id='inc-1'),
 ]
 s4 = assess(obs4)
 check('2 events recorded', s4['observation_count'] == 2)
@@ -228,12 +228,12 @@ check('unique_threat_count still None', s4['unique_threat_count'] is None)
 # 10. Warning-only policy
 # ===========================================================================
 print('\n== 10. WARNING policy ==')
-obs_warn = [Observation('e1', 'B1-F1-CAM-L', 'WARNING', 1)]
+obs_warn = [Observation('e1', 'TPB-F1-CAM-L', 'WARNING', 1)]
 s_warn = assess(obs_warn)
 check('WARNING event recorded', s_warn['observation_count'] == 1)
 check('Caution list non-empty', len(s_warn['caution']) > 0)
 check('Covered room under WARNING -> HOLD or NO_CONFIRMED_ROUTE',
-      route('B1-F1-R1', s_warn)['status'] in
+      route('TPB-F1-R1', s_warn)['status'] in
       ('HOLD_FOR_AUTHORIZED_GUIDANCE', 'NO_CONFIRMED_ROUTE'))
 
 
@@ -241,33 +241,33 @@ check('Covered room under WARNING -> HOLD or NO_CONFIRMED_ROUTE',
 # 11. Stair threat with reroute
 # ===========================================================================
 print('\n== 11. Stair threat ==')
-s_stair = assess([], manual_blocks=['B1-F4-STAIR-L'])
-r_stair = route('B1-F4-R3', s_stair)
+s_stair = assess([], manual_blocks=['TPB-F4-STAIR-L'])
+r_stair = route('TPB-F4-R3', s_stair)
 check('Blocking one stair still allows a route',
       r_stair['status'] == 'MODELED_ROUTE_AVAILABLE')
 check('Route does not use the blocked stair',
-      'B1-F4-STAIR-L' not in (r_stair['route'] or []))
+      'TPB-F4-STAIR-L' not in (r_stair['route'] or []))
 
 
 # ===========================================================================
 # 12. Origin threatened
 # ===========================================================================
 print('\n== 12. Origin threatened ==')
-s5 = assess([Observation('e1', 'B1-F1-CAM-L', 'CRITICAL', 1)])
+s5 = assess([Observation('e1', 'TPB-F1-CAM-L', 'CRITICAL', 1)])
 check('Origin inside covered area -> NO_CONFIRMED_ROUTE',
-      route('B1-F1-R1', s5)['status'] == 'NO_CONFIRMED_ROUTE')
+      route('TPB-F1-R1', s5)['status'] == 'NO_CONFIRMED_ROUTE')
 
 
 # ===========================================================================
 # 13. Manual closed edge (uses the other door)
 # ===========================================================================
 print('\n== 13. Manual edge closure ==')
-r_base = route('B1-F4-R3', assess([]))
+r_base = route('TPB-F4-R3', assess([]))
 first_edge = (r_base['route'][0], r_base['route'][1])
 first_door = first_edge[1]
-other_door = 'B1-F4-R3-DR' if first_door.endswith('-DL') else 'B1-F4-R3-DL'
+other_door = 'TPB-F4-R3-DR' if first_door.endswith('-DL') else 'TPB-F4-R3-DL'
 s_edge = assess([], closed_edges=[first_edge])
-r_new = route('B1-F4-R3', s_edge)
+r_new = route('TPB-F4-R3', s_edge)
 check('Closing one door edge still allows a route',
       r_new['status'] == 'MODELED_ROUTE_AVAILABLE')
 check('Reroute uses the OTHER door',
@@ -284,18 +284,18 @@ expect_raises('Unknown device raises ValueError',
               ValueError)
 
 expect_raises('Duplicate event_id raises ValueError',
-              lambda: assess([Observation('e1', 'B1-F1-CAM-L', 'CRITICAL', 1),
-                              Observation('e1', 'B1-F1-CAM-R', 'CRITICAL', 1)]),
+              lambda: assess([Observation('e1', 'TPB-F1-CAM-L', 'CRITICAL', 1),
+                              Observation('e1', 'TPB-F1-CAM-R', 'CRITICAL', 1)]),
               ValueError)
 
 expect_raises('Invalid level raises ValueError',
-              lambda: assess([Observation('e1', 'B1-F1-CAM-L',
+              lambda: assess([Observation('e1', 'TPB-F1-CAM-L',
                                           'SEVERE', 1)]),
               ValueError)
 
 expect_raises('Location outside coverage raises ValueError',
-              lambda: assess([Observation('e1', 'B1-F1-CAM-L', 'CRITICAL',
-                                          1, location='B2-F4-R3')]),
+              lambda: assess([Observation('e1', 'TPB-F1-CAM-L', 'CRITICAL',
+                                          1, location='AB-F4-R3')]),
               ValueError)
 
 expect_raises('Unknown manual block raises ValueError',
@@ -307,7 +307,7 @@ expect_raises('Invalid gate raises ValueError',
               ValueError)
 
 expect_raises('Unknown edge raises ValueError',
-              lambda: assess([], closed_edges=[('B1-F1-R1', 'B2-F1-R1')]),
+              lambda: assess([], closed_edges=[('TPB-F1-R1', 'AB-F1-R1')]),
               ValueError)
 
 
@@ -315,23 +315,27 @@ expect_raises('Unknown edge raises ValueError',
 # 15. Reset behaviour (fresh snapshot clears stale threats)
 # ===========================================================================
 print('\n== 15. Reset behaviour ==')
-s_threat = assess([Observation('e1', 'B1-F1-CAM-L', 'CRITICAL', 1)])
+s_threat = assess([Observation('e1', 'TPB-F1-CAM-L', 'CRITICAL', 1)])
 check('Threat snapshot isolates upper floor -> HOLD',
-      route('B1-F4-R3', s_threat)['status'] == 'HOLD_FOR_AUTHORIZED_GUIDANCE')
+      route('TPB-F4-R3', s_threat)['status'] == 'HOLD_FOR_AUTHORIZED_GUIDANCE')
 check('Fresh empty snapshot restores route',
-      route('B1-F4-R3', assess([]))['status'] == 'MODELED_ROUTE_AVAILABLE')
+      route('TPB-F4-R3', assess([]))['status'] == 'MODELED_ROUTE_AVAILABLE')
 
 
 # ===========================================================================
-# 16. Reroute from current location
+# 16. Threat at one gate allows full evacuation via opposite gate
 # ===========================================================================
-print('\n== 16. Reroute from current location ==')
-s_out = assess([Observation('e1', 'B1-CAM-OUT-L', 'CRITICAL', 1,
-                            location='B1-OUT-L')])
-check('Outdoor CRITICAL does not affect room B1-F1-R1 route',
-      route('B1-F1-R1', s_out)['status'] == 'MODELED_ROUTE_AVAILABLE')
+print('\n== 16. Gate threat and evacuation rerouting ==')
+s_out = assess([Observation('e1', 'TPB-CAM-OUT-L', 'CRITICAL', 1,
+                            location='TPB-OUT-L')])
+check('Threat at Gate-W area: All rooms can still safely evacuate',
+      all(route(r, s_out)['status'] == 'MODELED_ROUTE_AVAILABLE' for r in ROOMS))
+check('Threat at Gate-W area: All rooms reroute to GATE-NE',
+      all(route(r, s_out)['gate'] == 'GATE-NE' for r in ROOMS))
+check('Tech Pro Building avoids Stair L and uses Stair R',
+      any('STAIR-R' in n for n in (route('TPB-F1-R1', s_out)['route'] or [])))
 check('Occupant currently at blocked node -> NO_CONFIRMED_ROUTE',
-      route('B1-F1-R1', s_out, current='B1-OUT-L')['status']
+      route('TPB-F1-R1', s_out, current='TPB-OUT-L')['status']
       == 'NO_CONFIRMED_ROUTE')
 
 
@@ -339,7 +343,7 @@ check('Occupant currently at blocked node -> NO_CONFIRMED_ROUTE',
 # 17. Deterministic tie-breaking
 # ===========================================================================
 print('\n== 17. Deterministic tie-breaking ==')
-runs = [route('B1-F4-R3', base) for _ in range(5)]
+runs = [route('TPB-F4-R3', base) for _ in range(5)]
 check('Repeated routing is deterministic',
       all(r['route'] == runs[0]['route'] and r['cost'] == runs[0]['cost']
           for r in runs))
@@ -360,7 +364,7 @@ check(f'50 full all_routes sweeps in {elapsed:.2f}s (< 5s)', elapsed < 5.0)
 # 19. No route crosses a blocked or caution node
 # ===========================================================================
 print('\n== 19. No false routes across blocked/caution nodes ==')
-s_big = assess([Observation('e1', 'B1-F1-CAM-L', 'CRITICAL', 1)])
+s_big = assess([Observation('e1', 'TPB-F1-CAM-L', 'CRITICAL', 1)])
 off_limits = set(s_big['blocked']) | set(s_big['caution'])
 violations = []
 for r in ROOMS:

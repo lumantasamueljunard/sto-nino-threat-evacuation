@@ -205,14 +205,19 @@ function populateBlockDropdowns() {
   const stairSel    = document.getElementById('sb-block-stair');
   const corridorSel = document.getElementById('sb-block-corridor');
 
+  const bMap = {
+    TPB: { name: 'Tech Pro Building', floors: 4, count: 5 },
+    AB:  { name: 'Academic Building', floors: 4, count: 3 },
+    LB:  { name: 'Laboratory Building', floors: 2, count: 2 },
+  };
+
   // Rooms
-  const buildings = { 1: [4, 5], 2: [4, 3], 3: [2, 2] };
   let roomOpts = '<option value="">+ Block a Classroom…</option>';
-  for (const [b, [floors, count]] of Object.entries(buildings)) {
-    for (let f = 1; f <= floors; f++) {
-      for (let r = 1; r <= count; r++) {
-        const id = `B${b}-F${f}-R${r}`;
-        roomOpts += `<option value="${id}">${id} (B${b}-F${f})</option>`;
+  for (const [bCode, bData] of Object.entries(bMap)) {
+    for (let f = 1; f <= bData.floors; f++) {
+      for (let r = 1; r <= bData.count; r++) {
+        const id = `${bCode}-F${f}-R${r}`;
+        roomOpts += `<option value="${id}">${id} (${bData.name} F${f})</option>`;
       }
     }
   }
@@ -220,12 +225,12 @@ function populateBlockDropdowns() {
 
   // Corridors
   let corrOpts = '<option value="">+ Block Corridor Area…</option>';
-  for (const [b, [floors, count]] of Object.entries(buildings)) {
-    for (let f = 1; f <= floors; f++) {
-      for (let c = 0; c <= count; c++) {
-        const id = `B${b}-F${f}-C${c}`;
-        const loc = c === 0 ? 'West End' : c === count ? 'East End' : `Bay ${c}`;
-        corrOpts += `<option value="${id}">B${b}-F${f} Corridor (${loc})</option>`;
+  for (const [bCode, bData] of Object.entries(bMap)) {
+    for (let f = 1; f <= bData.floors; f++) {
+      for (let c = 0; c <= bData.count; c++) {
+        const id = `${bCode}-F${f}-C${c}`;
+        const loc = c === 0 ? 'West End' : c === bData.count ? 'East End' : `Bay ${c}`;
+        corrOpts += `<option value="${id}">${bCode}-F${f} Corridor (${loc})</option>`;
       }
     }
   }
@@ -233,10 +238,10 @@ function populateBlockDropdowns() {
 
   // Stairwells
   let stairOpts = '<option value="">+ Close a Stairwell…</option>';
-  for (const [b, [floors]] of Object.entries(buildings)) {
-    for (let f = 1; f <= floors; f++) {
-      stairOpts += `<option value="B${b}-F${f}-STAIR-L">Building ${b} Floor ${f} Left Stair</option>`;
-      stairOpts += `<option value="B${b}-F${f}-STAIR-R">Building ${b} Floor ${f} Right Stair</option>`;
+  for (const [bCode, bData] of Object.entries(bMap)) {
+    for (let f = 1; f <= bData.floors; f++) {
+      stairOpts += `<option value="${bCode}-F${f}-STAIR-L">${bCode} Floor ${f} Left Stair</option>`;
+      stairOpts += `<option value="${bCode}-F${f}-STAIR-R">${bCode} Floor ${f} Right Stair</option>`;
     }
   }
   if (stairSel) stairSel.innerHTML = stairOpts;
@@ -512,7 +517,7 @@ function switchTab(tab) {
 
 // ── Map Sub-Navigation ─────────────────────────────────────
 function switchMapView(view) {
-  ['campus', 'b1', 'b2', 'b3'].forEach(v => {
+  ['campus', 'tpb', 'ab', 'lb', 'b1', 'b2', 'b3'].forEach(v => {
     document.getElementById(`mapbtn-${v}`)?.classList.toggle('active', v === view);
   });
 
@@ -523,23 +528,23 @@ function switchMapView(view) {
     document.getElementById('view-building').style.display = 'none';
     appState.selectedBuilding = null;
   } else {
-    const bNum = view === 'b1' ? 1 : view === 'b2' ? 2 : 3;
-    appState.selectedBuilding = bNum;
+    const codeMap = { tpb: 'TPB', ab: 'AB', lb: 'LB', b1: 'TPB', b2: 'AB', b3: 'LB' };
+    const bCode = codeMap[view] || 'TPB';
+    appState.selectedBuilding = bCode;
     document.getElementById('view-campus').style.display = 'none';
     document.getElementById('view-building').style.display = '';
 
     // Auto-sync sidebar room selector to the currently viewed building
-    const prefix = `B${bNum}`;
     const sel = document.getElementById('sb-room-select');
     if (sel && appState.rooms?.length) {
-      const matchRoom = appState.rooms.find(r => r.startsWith(prefix));
-      if (matchRoom && !sel.value.startsWith(prefix)) {
+      const matchRoom = appState.rooms.find(r => r.startsWith(bCode) || (bCode === 'TPB' && r.startsWith('B1')) || (bCode === 'AB' && r.startsWith('B2')) || (bCode === 'LB' && r.startsWith('B3')));
+      if (matchRoom && !sel.value.startsWith(bCode)) {
         sel.value = matchRoom;
         updateEgressCard(matchRoom);
       }
     }
 
-    renderBuildingFloors(bNum, appState.snapshot);
+    renderBuildingFloors(bCode, appState.snapshot);
   }
 }
 
@@ -548,8 +553,8 @@ function renderOutdoorPaths(snapshot) {
   const container = document.getElementById('outdoor-paths-container');
   if (!container) return;
 
-  const wBlocked  = appState.gatesBlocked.includes('GATE-W');
-  const neBlocked = appState.gatesBlocked.includes('GATE-NE');
+  const wBlocked  = appState.gatesBlocked.includes('GATE-W') || snapshot?.blocked?.includes('GATE-W') || snapshot?.blocked?.includes('WEST-PATH');
+  const neBlocked = appState.gatesBlocked.includes('GATE-NE') || snapshot?.blocked?.includes('GATE-NE') || snapshot?.blocked?.includes('NORTH-PATH');
 
   const wCircle = document.getElementById('gate-w-circle');
   const wFill   = document.getElementById('gate-w-fill');
@@ -594,74 +599,53 @@ function renderOutdoorPaths(snapshot) {
     return;
   }
 
-  // Check whether each building actually has any room that CAN safely evacuate
-  const b1CanEvacuate = Object.entries(snapshot?.routes || {}).some(
-    ([rm, r]) => rm.startsWith('B1-') && r.status === 'MODELED_ROUTE_AVAILABLE'
-  );
-  const b2CanEvacuate = Object.entries(snapshot?.routes || {}).some(
-    ([rm, r]) => rm.startsWith('B2-') && r.status === 'MODELED_ROUTE_AVAILABLE'
-  );
-  const b3CanEvacuate = Object.entries(snapshot?.routes || {}).some(
-    ([rm, r]) => rm.startsWith('B3-') && r.status === 'MODELED_ROUTE_AVAILABLE'
-  );
+  const routes = snapshot?.routes || {};
+  const tpbRoutes = Object.entries(routes).filter(([rm]) => rm.startsWith('TPB-') || rm.startsWith('B1-'));
+  const abRoutes  = Object.entries(routes).filter(([rm]) => rm.startsWith('AB-')  || rm.startsWith('B2-'));
+  const lbRoutes  = Object.entries(routes).filter(([rm]) => rm.startsWith('LB-')  || rm.startsWith('B3-'));
 
-  const b1HasThreat = Object.entries(snapshot?.routes || {}).some(
-    ([rm, r]) => rm.startsWith('B1-') && r.status === 'NO_CONFIRMED_ROUTE'
-  );
-  const b2HasThreat = Object.entries(snapshot?.routes || {}).some(
-    ([rm, r]) => rm.startsWith('B2-') && r.status === 'NO_CONFIRMED_ROUTE'
-  );
-  const b3HasThreat = Object.entries(snapshot?.routes || {}).some(
-    ([rm, r]) => rm.startsWith('B3-') && r.status === 'NO_CONFIRMED_ROUTE'
-  );
+  const tpbCanEvacuate = tpbRoutes.some(([, r]) => r.status === 'MODELED_ROUTE_AVAILABLE');
+  const abCanEvacuate  = abRoutes.some(([, r]) => r.status === 'MODELED_ROUTE_AVAILABLE');
+  const lbCanEvacuate  = lbRoutes.some(([, r]) => r.status === 'MODELED_ROUTE_AVAILABLE');
+
+  const tpbHasThreat = tpbRoutes.some(([, r]) => r.status === 'NO_CONFIRMED_ROUTE');
+  const abHasThreat  = abRoutes.some(([, r]) => r.status === 'NO_CONFIRMED_ROUTE');
+  const lbHasThreat  = lbRoutes.some(([, r]) => r.status === 'NO_CONFIRMED_ROUTE');
+
+  // Check which specific stairwell in Tech Pro Building is actively and safely used:
+  const tpbUsesStairL = tpbRoutes.some(([, r]) => r.status === 'MODELED_ROUTE_AVAILABLE' && r.route?.some(n => n.includes('STAIR-L')));
+  const tpbUsesStairR = tpbRoutes.some(([, r]) => r.status === 'MODELED_ROUTE_AVAILABLE' && r.route?.some(n => n.includes('STAIR-R')));
+
+  // Gate destinations chosen for Academic and Laboratory buildings:
+  const abGate = abRoutes.find(([, r]) => r.status === 'MODELED_ROUTE_AVAILABLE')?.[1]?.gate;
+  const lbGate = lbRoutes.find(([, r]) => r.status === 'MODELED_ROUTE_AVAILABLE')?.[1]?.gate;
 
   let pathsHtml = '';
 
-  // Calibrated Obstacle-Free Walkway Waypoints along open concrete driveways (Zero Building/Tree/Fence clipping):
-  // West Gate Portal: (195, 405) with clear paved driveway along y=405
-  // NE Gate Portal: (778, 146) with clear northeast driveway through (750, 160) -> (690, 210)
-  // Central Courtyard Open Quad: (460, 450) and (600, 450)
-
-  // 1. Building 1 Left Stair Egress: only draw if Building 1 CAN evacuate
-  if (b1CanEvacuate) {
-    if (!wBlocked) {
-      pathsHtml += `
-        <path d="M 240 395 L 235 405 L 195 405" fill="none" stroke="var(--c-green)" stroke-width="6" stroke-dasharray="10,6" filter="url(#glow-g)" marker-end="url(#arr-g)">
-          <animate attributeName="stroke-dashoffset" from="32" to="0" dur="0.9s" repeatCount="indefinite"/>
-        </path>`;
-    } else {
-      // Reroute across open quad driveway avoiding trees and fences
-      pathsHtml += `
-        <path d="M 240 395 L 330 405 L 460 450 L 600 450 L 660 350 L 690 210 L 750 160 L 778 146" fill="none" stroke="var(--c-green)" stroke-width="6" stroke-dasharray="10,6" filter="url(#glow-g)" marker-end="url(#arr-g)">
-          <animate attributeName="stroke-dashoffset" from="32" to="0" dur="1.3s" repeatCount="indefinite"/>
-        </path>`;
-    }
+  // 1. Tech Pro Building Left Stair Egress (only if Stair L is actively and safely used)
+  if (tpbUsesStairL && !wBlocked) {
+    pathsHtml += `
+      <path d="M 240 395 L 235 405 L 195 405" fill="none" stroke="var(--c-green)" stroke-width="6" stroke-dasharray="10,6" filter="url(#glow-g)" marker-end="url(#arr-g)">
+        <animate attributeName="stroke-dashoffset" from="32" to="0" dur="0.9s" repeatCount="indefinite"/>
+      </path>`;
   }
 
-  // 2. Building 1 Right Stair Egress: only draw if Building 1 CAN evacuate
-  if (b1CanEvacuate) {
-    if (!neBlocked) {
-      pathsHtml += `
-        <path d="M 630 310 L 690 210 L 750 160 L 778 146" fill="none" stroke="var(--c-green)" stroke-width="6" stroke-dasharray="10,6" filter="url(#glow-g)" marker-end="url(#arr-g)">
-          <animate attributeName="stroke-dashoffset" from="32" to="0" dur="0.8s" repeatCount="indefinite"/>
-        </path>`;
-    } else {
-      // Reroute through clear quad driveway into West Gate along y=405
-      pathsHtml += `
-        <path d="M 630 310 L 660 350 L 600 450 L 460 450 L 330 405 L 195 405" fill="none" stroke="var(--c-green)" stroke-width="6" stroke-dasharray="10,6" filter="url(#glow-g)" marker-end="url(#arr-g)">
-          <animate attributeName="stroke-dashoffset" from="32" to="0" dur="1.3s" repeatCount="indefinite"/>
-        </path>`;
-    }
+  // 2. Tech Pro Building Right Stair Egress (only if Stair R is actively and safely used)
+  if (tpbUsesStairR && !neBlocked) {
+    pathsHtml += `
+      <path d="M 630 310 L 690 210 L 750 160 L 778 146" fill="none" stroke="var(--c-green)" stroke-width="6" stroke-dasharray="10,6" filter="url(#glow-g)" marker-end="url(#arr-g)">
+        <animate attributeName="stroke-dashoffset" from="32" to="0" dur="0.8s" repeatCount="indefinite"/>
+      </path>`;
   }
 
-  // 3. Building 2 Egress: ONLY draw if Building 2 CAN safely evacuate
-  if (b2CanEvacuate) {
-    if (!neBlocked) {
+  // 3. Academic Building Egress (follows its modeled safe gate):
+  if (abCanEvacuate) {
+    if (abGate === 'GATE-NE' && !neBlocked) {
       pathsHtml += `
         <path d="M 640 450 L 630 350 L 660 240 L 750 160 L 778 146" fill="none" stroke="var(--c-green)" stroke-width="6" stroke-dasharray="10,6" filter="url(#glow-g)" marker-end="url(#arr-g)">
           <animate attributeName="stroke-dashoffset" from="32" to="0" dur="1.1s" repeatCount="indefinite"/>
         </path>`;
-    } else {
+    } else if (abGate === 'GATE-W' && !wBlocked) {
       pathsHtml += `
         <path d="M 640 480 L 580 480 L 460 450 L 330 405 L 195 405" fill="none" stroke="var(--c-green)" stroke-width="6" stroke-dasharray="10,6" filter="url(#glow-g)" marker-end="url(#arr-g)">
           <animate attributeName="stroke-dashoffset" from="32" to="0" dur="1.2s" repeatCount="indefinite"/>
@@ -669,14 +653,14 @@ function renderOutdoorPaths(snapshot) {
     }
   }
 
-  // 4. Building 3 Egress: ONLY draw if Building 3 CAN safely evacuate
-  if (b3CanEvacuate) {
-    if (!wBlocked) {
+  // 4. Laboratory Building Egress (follows its modeled safe gate):
+  if (lbCanEvacuate) {
+    if (lbGate === 'GATE-W' && !wBlocked) {
       pathsHtml += `
         <path d="M 420 500 L 330 405 L 195 405" fill="none" stroke="var(--c-green)" stroke-width="6" stroke-dasharray="10,6" filter="url(#glow-g)" marker-end="url(#arr-g)">
           <animate attributeName="stroke-dashoffset" from="32" to="0" dur="0.9s" repeatCount="indefinite"/>
         </path>`;
-    } else {
+    } else if (lbGate === 'GATE-NE' && !neBlocked) {
       pathsHtml += `
         <path d="M 420 500 L 460 460 L 600 450 L 660 350 L 690 210 L 750 160 L 778 146" fill="none" stroke="var(--c-green)" stroke-width="6" stroke-dasharray="10,6" filter="url(#glow-g)" marker-end="url(#arr-g)">
           <animate attributeName="stroke-dashoffset" from="32" to="0" dur="1.3s" repeatCount="indefinite"/>
@@ -686,17 +670,17 @@ function renderOutdoorPaths(snapshot) {
 
   // 6 Ground-Floor Perimeter Camera Devices (Ground Level Only)
   const outdoorCams = [
-    { id: 'B1-OUT-L', x: 200, y: 425 },
-    { id: 'B1-OUT-R', x: 720, y: 225 },
-    { id: 'B2-OUT-L', x: 670, y: 495 },
-    { id: 'B2-OUT-R', x: 750, y: 360 },
-    { id: 'B3-OUT-L', x: 300, y: 535 },
-    { id: 'B3-OUT-R', x: 440, y: 560 },
+    { id: 'TPB-OUT-L', x: 200, y: 425 },
+    { id: 'TPB-OUT-R', x: 720, y: 225 },
+    { id: 'AB-OUT-L',  x: 670, y: 495 },
+    { id: 'AB-OUT-R',  x: 750, y: 360 },
+    { id: 'LB-OUT-L',  x: 300, y: 535 },
+    { id: 'LB-OUT-R',  x: 440, y: 560 },
   ];
 
   let outdoorCamBadges = '';
   outdoorCams.forEach(c => {
-    const hasThreat = appState.detections.find(d => d.device_id === c.id);
+    const hasThreat = appState.detections.find(d => d.device_id === c.id || d.device_id === c.id.replace('TPB', 'B1').replace('AB', 'B2').replace('LB', 'B3'));
     const lvl = hasThreat?.classification?.level || 'NORMAL';
     const isBlocked = snapshot?.blocked?.includes(c.id);
     const isCaution = snapshot?.caution?.includes(c.id);
@@ -710,9 +694,9 @@ function renderOutdoorPaths(snapshot) {
     `;
   });
 
-  // Dynamic Ground Stair Beacons matching the real evacuation state of each building:
-  const getBeaconHtml = (cx, cy, canEvac, hasThr) => {
-    const col = canEvac ? 'var(--c-green)' : hasThr ? 'var(--c-red)' : 'var(--c-amber)';
+  // Dynamic Ground Stair Beacons:
+  const getBeaconHtml = (cx, cy, isSafeAndActive, isThreat) => {
+    const col = isSafeAndActive ? 'var(--c-green)' : isThreat ? 'var(--c-red)' : 'var(--c-amber)';
     return `
       <circle cx="${cx}" cy="${cy}" r="7" fill="${col}"/>
       <circle cx="${cx}" cy="${cy}" r="13" fill="none" stroke="${col}" stroke-width="2" opacity="0.6">
@@ -723,17 +707,17 @@ function renderOutdoorPaths(snapshot) {
   };
 
   const beacons = `
-    <!-- Building 1 Left Stair Base -->
-    ${getBeaconHtml(240, 395, b1CanEvacuate, b1HasThreat)}
+    <!-- Tech Pro Left Stair Base -->
+    ${getBeaconHtml(240, 395, tpbUsesStairL, tpbHasThreat && !tpbUsesStairL)}
 
-    <!-- Building 1 Right Stair Base -->
-    ${getBeaconHtml(630, 310, b1CanEvacuate, b1HasThreat)}
+    <!-- Tech Pro Right Stair Base -->
+    ${getBeaconHtml(630, 310, tpbUsesStairR, tpbHasThreat && !tpbUsesStairR)}
 
-    <!-- Building 2 Stair Base -->
-    ${getBeaconHtml(640, 480, b2CanEvacuate, b2HasThreat)}
+    <!-- Academic Building Stair Base -->
+    ${getBeaconHtml(640, 480, abCanEvacuate, abHasThreat)}
 
-    <!-- Building 3 Stair Base -->
-    ${getBeaconHtml(420, 500, b3CanEvacuate, b3HasThreat)}
+    <!-- Laboratory Building Stair Base -->
+    ${getBeaconHtml(420, 500, lbCanEvacuate, lbHasThreat)}
 
     <!-- 6 Ground-Floor Perimeter Devices -->
     ${outdoorCamBadges}
@@ -743,38 +727,49 @@ function renderOutdoorPaths(snapshot) {
 }
 
 // ── Building Floor Plan Renderer (Architectural Blueprint) ─
-function renderBuildingFloors(bNum, snapshot) {
-  if (!bNum) return;
-  const buildings = { 1: [4, 5], 2: [4, 3], 3: [2, 2] };
-  const images    = { 1: '/static/b1_floor_plan.jpg', 2: '/static/b2_floor_plan.jpg', 3: '/static/b3_floor_plan.jpg' };
-  const [floors, roomsPerFloor] = buildings[bNum];
+function renderBuildingFloors(bCodeOrNum, snapshot) {
+  if (!bCodeOrNum) return;
 
-  // Exact classroom geometry mapped directly onto architectural blueprints
+  const metaMap = {
+    TPB: { code: 'TPB', name: 'Tech Pro Building', num: 1, floors: 4, roomsPerFloor: 5, img: '/static/b1_floor_plan.jpg', imgH: 502 },
+    AB:  { code: 'AB',  name: 'Academic Building', num: 2, floors: 4, roomsPerFloor: 3, img: '/static/b2_floor_plan.jpg', imgH: 523 },
+    LB:  { code: 'LB',  name: 'Laboratory Building', num: 3, floors: 2, roomsPerFloor: 2, img: '/static/b3_floor_plan.jpg', imgH: 436 },
+    1:   { code: 'TPB', name: 'Tech Pro Building', num: 1, floors: 4, roomsPerFloor: 5, img: '/static/b1_floor_plan.jpg', imgH: 502 },
+    2:   { code: 'AB',  name: 'Academic Building', num: 2, floors: 4, roomsPerFloor: 3, img: '/static/b2_floor_plan.jpg', imgH: 523 },
+    3:   { code: 'LB',  name: 'Laboratory Building', num: 3, floors: 2, roomsPerFloor: 2, img: '/static/b3_floor_plan.jpg', imgH: 436 },
+    b1:  { code: 'TPB', name: 'Tech Pro Building', num: 1, floors: 4, roomsPerFloor: 5, img: '/static/b1_floor_plan.jpg', imgH: 502 },
+    b2:  { code: 'AB',  name: 'Academic Building', num: 2, floors: 4, roomsPerFloor: 3, img: '/static/b2_floor_plan.jpg', imgH: 523 },
+    b3:  { code: 'LB',  name: 'Laboratory Building', num: 3, floors: 2, roomsPerFloor: 2, img: '/static/b3_floor_plan.jpg', imgH: 436 },
+  };
+
+  const bMeta = metaMap[bCodeOrNum] || metaMap['TPB'];
+  const { code: bCode, name: bName, num: bNum, floors, roomsPerFloor, img: bImg, imgH } = bMeta;
+
   const roomBoxes = {
-    1: {
+    TPB: {
       1: { x: 148, y: 58, w: 148, h: 242, doorX: 232, doorY: 298, corrY: 360, stairLX: 110, stairRX: 895 },
       2: { x: 298, y: 58, w: 138, h: 242, doorX: 370, doorY: 298, corrY: 360, stairLX: 110, stairRX: 895 },
       3: { x: 438, y: 58, w: 138, h: 242, doorX: 495, doorY: 298, corrY: 360, stairLX: 110, stairRX: 895 },
       4: { x: 578, y: 58, w: 132, h: 242, doorX: 618, doorY: 298, corrY: 360, stairLX: 110, stairRX: 895 },
       5: { x: 712, y: 58, w: 146, h: 242, doorX: 762, doorY: 298, corrY: 360, stairLX: 110, stairRX: 895 },
     },
-    2: {
+    AB: {
       1: { x: 150, y: 58, w: 242, h: 242, doorX: 280, doorY: 298, corrY: 365, stairLX: 110, stairRX: 895 },
       2: { x: 394, y: 58, w: 224, h: 242, doorX: 495, doorY: 298, corrY: 365, stairLX: 110, stairRX: 895 },
       3: { x: 620, y: 58, w: 240, h: 242, doorX: 720, doorY: 298, corrY: 365, stairLX: 110, stairRX: 895 },
     },
-    3: {
+    LB: {
       1: { x: 165, y: 48, w: 350, h: 212, doorX: 340, doorY: 258, corrY: 315, stairLX: 120, stairRX: 900 },
       2: { x: 518, y: 48, w: 342, h: 212, doorX: 665, doorY: 258, corrY: 315, stairLX: 120, stairRX: 900 },
     }
   };
 
-  document.getElementById('bld-view-title').textContent = `Building ${bNum}`;
+  document.getElementById('bld-view-title').textContent = `${bName} (${bCode})`;
   document.getElementById('bld-view-sub').textContent =
-    `${floors} Floors &middot; ${floors * roomsPerFloor} Classrooms`;
+    `Architectural Blueprint · ${floors} Floors · ${floors * roomsPerFloor} Classrooms · Dynamic Egress`;
 
   const grid = document.getElementById('floor-grid');
-  grid.style.gridTemplateColumns = floors > 1 ? '1fr 1fr' : '1fr';
+  if (!grid) return;
 
   let anyBlocked = false;
   let anyCritical = false;
@@ -783,25 +778,24 @@ function renderBuildingFloors(bNum, snapshot) {
 
   grid.innerHTML = '';
   for (let f = 1; f <= floors; f++) {
-    const pCode = `B${bNum}-F${f}`;
+    const pCode = `${bCode}-F${f}`;
+    const pCodeAlt = `B${bNum}-F${f}`;
     const imgW = 1024;
-    const imgH = bNum === 1 ? 502 : bNum === 2 ? 523 : 436;
 
-    // EXACT BOTTOM CORNERS for Devices (Large, Distinct, Zero Blue)
     const badgeW = 140;
     const badgeH = 36;
-    const camLeftX  = 12;
-    const camLeftY  = imgH - badgeH - 10;
-    const camRightX = imgW - badgeW - 12;
-    const camRightY = imgH - badgeH - 10;
+    const camLeftX = 148;
+    const camLeftY = imgH - badgeH - 12;
+    const camRightX = 1024 - 148 - badgeW;
+    const camRightY = imgH - badgeH - 12;
 
     const didLeft  = `${pCode}-CAM-L`;
     const didRight = `${pCode}-CAM-R`;
 
-    // Dynamic device status
-    const detLeft  = appState.detections.find(d => d.device_id === didLeft);
-    const detRight = appState.detections.find(d => d.device_id === didRight);
-    const colLeft  = detLeft?.classification?.level === 'CRITICAL' ? 'var(--c-red)' : detLeft?.classification?.level === 'WARNING' ? 'var(--c-amber)' : 'var(--c-green)';
+    const detLeft  = appState.detections.find(d => d.device_id === didLeft || d.device_id === `${pCodeAlt}-CAM-L`);
+    const detRight = appState.detections.find(d => d.device_id === didRight || d.device_id === `${pCodeAlt}-CAM-R`);
+
+    const colLeft = detLeft?.classification?.level === 'CRITICAL' ? 'var(--c-red)' : detLeft?.classification?.level === 'WARNING' ? 'var(--c-amber)' : 'var(--c-green)';
     const colRight = detRight?.classification?.level === 'CRITICAL' ? 'var(--c-red)' : detRight?.classification?.level === 'WARNING' ? 'var(--c-amber)' : 'var(--c-green)';
 
     let roomOverlays = '';
@@ -814,17 +808,12 @@ function renderBuildingFloors(bNum, snapshot) {
     // Render each classroom on this floor
     for (let r = 1; r <= roomsPerFloor; r++) {
       const rmId = `${pCode}-R${r}`;
-      const rm = snapshot?.routes?.[rmId];
-      const box = roomBoxes[bNum]?.[r];
+      const rm = snapshot?.routes?.[rmId] || snapshot?.routes?.[`${pCodeAlt}-R${r}`];
+      const box = roomBoxes[bCode]?.[r];
       if (!box) continue;
 
       const rmStatus = rm?.status || 'MODELED_ROUTE_AVAILABLE';
 
-      // Translucent Room Overlays ONLY show during threats/emergencies:
-      // Red: Directly Threatened Room/Floor
-      // Yellow: Isolated/On Hold Room
-      // Green: Safe Evacuation Room (only during emergency)
-      // When ALL CLEAR (No threat): Clean architectural blueprint with subtle classroom boundary
       if (isEmergency) {
         let fillCol, strokeCol, tagText, tagCol;
         if (rmStatus === 'MODELED_ROUTE_AVAILABLE') {
@@ -857,7 +846,6 @@ function renderBuildingFloors(bNum, snapshot) {
           </g>
         `;
 
-        // Draw evacuation arrows for all safe rooms strictly during an active emergency
         if (rmStatus === 'MODELED_ROUTE_AVAILABLE') {
           const useLeft = rm?.route?.some(n => n.includes('STAIR-L')) || r <= roomsPerFloor / 2;
           const targetX = useLeft ? Math.max(box.stairLX, 125) : Math.min(box.stairRX, 880);
@@ -867,12 +855,11 @@ function renderBuildingFloors(bNum, snapshot) {
           arrows += `
             <path d="M ${startX} ${startY} L ${box.doorX} ${box.doorY} L ${box.doorX} ${box.corrY} L ${targetX} ${box.corrY}"
               fill="none" stroke="var(--c-green)" stroke-width="4.5"
-              stroke-dasharray="10,6" filter="url(#glow-g)" marker-end="url(#arr-f-${bNum}-${f})">
+              stroke-dasharray="10,6" filter="url(#glow-g)" marker-end="url(#arr-f-${bCode}-${f})">
               <animate attributeName="stroke-dashoffset" from="32" to="0" dur="0.85s" repeatCount="indefinite"/>
             </path>`;
         }
       } else {
-        // Normal baseline (All Clear): clean subtle room borders, zero green fills, zero arrows
         roomOverlays += `
           <g id="box-${rmId}">
             <rect x="${box.x}" y="${box.y}" width="${box.w}" height="${box.h}" rx="4"
@@ -905,10 +892,10 @@ function renderBuildingFloors(bNum, snapshot) {
         </span>
       </div>
       <div class="floor-card-img-wrap" style="position:relative;">
-        <img src="${images[bNum]}" alt="Floor ${f} Blueprint" style="width:100%; display:block;" />
+        <img src="${bImg}" alt="Floor ${f} Blueprint" style="width:100%; display:block;" />
         <svg viewBox="0 0 ${imgW} ${imgH}" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;" xmlns="http://www.w3.org/2000/svg">
           <defs>
-            <marker id="arr-f-${bNum}-${f}" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+            <marker id="arr-f-${bCode}-${f}" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
               <polygon points="0 0, 9 4.5, 0 9" fill="var(--c-green)"/>
             </marker>
           </defs>
@@ -919,7 +906,6 @@ function renderBuildingFloors(bNum, snapshot) {
           <!-- Evacuation Directional Arrow Lines (Thick, All Rooms) -->
           ${arrows}
 
-          <!-- LARGE Devices at EXACT Bottom Corners (Zero Blue, Neutral Dark Slate - Intact) -->
           <!-- Bottom Left Camera Device -->
           <g>
             <rect x="${camLeftX}" y="${camLeftY}" width="${badgeW}" height="${badgeH}" rx="6" fill="#0f172a" stroke="#334155" stroke-width="2"/>
@@ -934,7 +920,8 @@ function renderBuildingFloors(bNum, snapshot) {
             <text x="${camRightX + 28}" y="${camRightY + (badgeH / 2) + 4}" fill="#ffffff" font-size="11" font-weight="700" font-family="'JetBrains Mono', monospace">${didRight}</text>
           </g>
         </svg>
-      </div>`;
+      </div>
+    `;
     grid.appendChild(card);
   }
 
@@ -948,16 +935,22 @@ function renderBuildingFloors(bNum, snapshot) {
 // ── Building Status Dots in Map Subnav ──────────────────────
 function updateBuildingBadges(snapshot) {
   const isEmergency = snapshot?.global_status === 'CRITICAL' || snapshot?.global_status === 'WARNING';
-  [1, 2, 3].forEach(b => {
-    const dot = document.getElementById(`dot-b${b}`);
-    const badgeEl = document.getElementById(`b${b}-badge`);
+  const bMap = [
+    { code: 'TPB', num: 1, dotId: 'dot-tpb', fallbackDot: 'dot-b1', badgeId: 'tpb-badge', fallbackBadge: 'b1-badge' },
+    { code: 'AB',  num: 2, dotId: 'dot-ab',  fallbackDot: 'dot-b2', badgeId: 'ab-badge',  fallbackBadge: 'b2-badge' },
+    { code: 'LB',  num: 3, dotId: 'dot-lb',  fallbackDot: 'dot-b3', badgeId: 'lb-badge',  fallbackBadge: 'b3-badge' },
+  ];
+
+  bMap.forEach(({ code, num, dotId, fallbackDot, badgeId, fallbackBadge }) => {
+    const dot = document.getElementById(dotId) || document.getElementById(fallbackDot);
+    const badgeEl = document.getElementById(badgeId) || document.getElementById(fallbackBadge);
     if (!dot) return;
 
     const hasCritical = Object.entries(snapshot?.routes || {}).some(
-      ([rm, r]) => rm.startsWith(`B${b}-`) && r.status === 'NO_CONFIRMED_ROUTE'
+      ([rm, r]) => (rm.startsWith(`${code}-`) || rm.startsWith(`B${num}-`)) && r.status === 'NO_CONFIRMED_ROUTE'
     );
     const hasWarning = Object.entries(snapshot?.routes || {}).some(
-      ([rm, r]) => rm.startsWith(`B${b}-`) && r.status === 'HOLD_FOR_AUTHORIZED_GUIDANCE'
+      ([rm, r]) => (rm.startsWith(`${code}-`) || rm.startsWith(`B${num}-`)) && r.status === 'HOLD_FOR_AUTHORIZED_GUIDANCE'
     );
 
     let stat, label;
@@ -1063,25 +1056,30 @@ function renderCamGrid() {
   const allDevices = appState.devices;
   const detections = appState.detections || [];
 
-  // Descriptive location mapping for ground-floor outdoor devices
   const outdoorDescriptions = {
-    'B1-OUT-L': 'Ground Exterior — Building 1 West Approach',
-    'B1-OUT-R': 'Ground Exterior — Building 1 East Approach',
-    'B2-OUT-L': 'Ground Exterior — Building 2 North Courtyard',
-    'B2-OUT-R': 'Ground Exterior — Building 2 South Alley',
-    'B3-OUT-L': 'Ground Exterior — Building 3 West Gate Approach',
-    'B3-OUT-R': 'Ground Exterior — Building 3 Courtyard Approach',
+    'TPB-OUT-L': 'Ground Exterior — Tech Pro West Approach (near Gate-W)',
+    'TPB-OUT-R': 'Ground Exterior — Tech Pro East Approach (near Gate-NE)',
+    'AB-OUT-L':  'Ground Exterior — Academic North Courtyard',
+    'AB-OUT-R':  'Ground Exterior — Academic South / East Alley',
+    'LB-OUT-L':  'Ground Exterior — Laboratory West Gate Approach',
+    'LB-OUT-R':  'Ground Exterior — Laboratory Courtyard Approach',
+    'B1-OUT-L':  'Ground Exterior — Tech Pro West Approach (near Gate-W)',
+    'B1-OUT-R':  'Ground Exterior — Tech Pro East Approach (near Gate-NE)',
+    'B2-OUT-L':  'Ground Exterior — Academic North Courtyard',
+    'B2-OUT-R':  'Ground Exterior — Academic South / East Alley',
+    'B3-OUT-L':  'Ground Exterior — Laboratory West Gate Approach',
+    'B3-OUT-R':  'Ground Exterior — Laboratory Courtyard Approach',
   };
 
   const filtered = Object.values(allDevices).filter(d => {
     const isOutdoor = d.kind === 'outdoor';
-    const b1 = d.device_id.startsWith('B1') && !isOutdoor;
-    const b2 = d.device_id.startsWith('B2') && !isOutdoor;
-    const b3 = d.device_id.startsWith('B3') && !isOutdoor;
+    const tpb = (d.device_id.startsWith('TPB') || d.device_id.startsWith('B1')) && !isOutdoor;
+    const ab  = (d.device_id.startsWith('AB')  || d.device_id.startsWith('B2')) && !isOutdoor;
+    const lb  = (d.device_id.startsWith('LB')  || d.device_id.startsWith('B3')) && !isOutdoor;
     if (filter === 'outside') return isOutdoor;
-    if (filter === 'b1') return b1;
-    if (filter === 'b2') return b2;
-    if (filter === 'b3') return b3;
+    if (filter === 'tpb' || filter === 'b1') return tpb;
+    if (filter === 'ab'  || filter === 'b2') return ab;
+    if (filter === 'lb'  || filter === 'b3') return lb;
     return false;
   });
 

@@ -238,17 +238,17 @@
           </svg>
           School Map
         </button>
-        <button class="map-btn" onclick="switchMapView('b1')" id="mapbtn-b1">
-          <span class="status-beacon normal" id="dot-b1" style="width:7px; height:7px;"></span>
-          Building 1
+        <button class="map-btn" onclick="switchMapView('tpb')" id="mapbtn-tpb">
+          <span class="status-beacon normal" id="dot-tpb" style="width:7px; height:7px;"></span>
+          Tech Pro (TPB)
         </button>
-        <button class="map-btn" onclick="switchMapView('b2')" id="mapbtn-b2">
-          <span class="status-beacon normal" id="dot-b2" style="width:7px; height:7px;"></span>
-          Building 2
+        <button class="map-btn" onclick="switchMapView('ab')" id="mapbtn-ab">
+          <span class="status-beacon normal" id="dot-ab" style="width:7px; height:7px;"></span>
+          Academic (AB)
         </button>
-        <button class="map-btn" onclick="switchMapView('b3')" id="mapbtn-b3">
-          <span class="status-beacon normal" id="dot-b3" style="width:7px; height:7px;"></span>
-          Building 3
+        <button class="map-btn" onclick="switchMapView('lb')" id="mapbtn-lb">
+          <span class="status-beacon normal" id="dot-lb" style="width:7px; height:7px;"></span>
+          Laboratory (LB)
         </button>
 
         <div class="map-legend">
@@ -313,14 +313,14 @@
               </g>
 
               <!-- Building Labels on Site Plan -->
-              <rect x="290" y="300" width="96" height="22" rx="4" fill="rgba(15, 23, 42, 0.85)"/>
-              <text x="338" y="315" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="700" font-family="'Plus Jakarta Sans', sans-serif">BUILDING 1</text>
+              <rect x="260" y="300" width="156" height="22" rx="4" fill="rgba(15, 23, 42, 0.85)"/>
+              <text x="338" y="315" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="700" font-family="'Plus Jakarta Sans', sans-serif">TECH PRO BUILDING (TPB)</text>
 
-              <rect x="650" y="420" width="96" height="22" rx="4" fill="rgba(15, 23, 42, 0.85)"/>
-              <text x="698" y="435" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="700" font-family="'Plus Jakarta Sans', sans-serif">BUILDING 2</text>
+              <rect x="620" y="420" width="156" height="22" rx="4" fill="rgba(15, 23, 42, 0.85)"/>
+              <text x="698" y="435" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="700" font-family="'Plus Jakarta Sans', sans-serif">ACADEMIC BUILDING (AB)</text>
 
-              <rect x="330" y="560" width="96" height="22" rx="4" fill="rgba(15, 23, 42, 0.85)"/>
-              <text x="378" y="575" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="700" font-family="'Plus Jakarta Sans', sans-serif">BUILDING 3</text>
+              <rect x="300" y="560" width="156" height="22" rx="4" fill="rgba(15, 23, 42, 0.85)"/>
+              <text x="378" y="575" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="700" font-family="'Plus Jakarta Sans', sans-serif">LABORATORY BUILDING (LB)</text>
             </svg>
           </div>
         </div>
@@ -375,28 +375,28 @@
       <!-- Building Infrastructure Cards -->
       <div class="building-cards">
         <div class="building-card">
-          <div class="building-card-name">Building 1</div>
+          <div class="building-card-name">Tech Pro Building (TPB)</div>
           <div class="building-card-sub">4 Floors &middot; 20 Classrooms</div>
           <div class="building-stat"><span>Stair Columns</span><span>2 (Left &amp; Right)</span></div>
           <div class="building-stat"><span>ESP32 Alarm Nodes</span><span>8 units</span></div>
           <div class="building-stat"><span>Cameras</span><span>8 indoor</span></div>
-          <div style="margin-top:10px;" id="b1-badge"><span class="badge safe"><span class="status-beacon normal" style="width:6px; height:6px;"></span> Normal</span></div>
+          <div style="margin-top:10px;" id="tpb-badge"><span class="badge safe"><span class="status-beacon normal" style="width:6px; height:6px;"></span> Normal</span></div>
         </div>
         <div class="building-card">
-          <div class="building-card-name">Building 2</div>
+          <div class="building-card-name">Academic Building (AB)</div>
           <div class="building-card-sub">4 Floors &middot; 12 Classrooms</div>
           <div class="building-stat"><span>Stair Columns</span><span>2 (Left &amp; Right)</span></div>
           <div class="building-stat"><span>ESP32 Alarm Nodes</span><span>8 units</span></div>
           <div class="building-stat"><span>Cameras</span><span>8 indoor</span></div>
-          <div style="margin-top:10px;" id="b2-badge"><span class="badge safe"><span class="status-beacon normal" style="width:6px; height:6px;"></span> Normal</span></div>
+          <div style="margin-top:10px;" id="ab-badge"><span class="badge safe"><span class="status-beacon normal" style="width:6px; height:6px;"></span> Normal</span></div>
         </div>
         <div class="building-card">
-          <div class="building-card-name">Building 3</div>
+          <div class="building-card-name">Laboratory Building (LB)</div>
           <div class="building-card-sub">2 Floors &middot; 4 Classrooms</div>
           <div class="building-stat"><span>Stair Columns</span><span>2 (Left &amp; Right)</span></div>
           <div class="building-stat"><span>ESP32 Alarm Nodes</span><span>4 units</span></div>
           <div class="building-stat"><span>Cameras</span><span>4 indoor</span></div>
-          <div style="margin-top:10px;" id="b3-badge"><span class="badge safe"><span class="status-beacon normal" style="width:6px; height:6px;"></span> Normal</span></div>
+          <div style="margin-top:10px;" id="lb-badge"><span class="badge safe"><span class="status-beacon normal" style="width:6px; height:6px;"></span> Normal</span></div>
         </div>
       </div>
 
@@ -488,17 +488,17 @@
           <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 14h-2v-2h2zm0-4h-2V7h2z"/></svg>
           Ground Perimeter (6)
         </button>
-        <button class="cam-filter-btn" onclick="filterCams('b1')" id="camf-b1">
+        <button class="cam-filter-btn" onclick="filterCams('tpb')" id="camf-tpb">
           <svg class="icon icon-sm" viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2" ry="2"/></svg>
-          Building 1 (8)
+          Tech Pro (8)
         </button>
-        <button class="cam-filter-btn" onclick="filterCams('b2')" id="camf-b2">
+        <button class="cam-filter-btn" onclick="filterCams('ab')" id="camf-ab">
           <svg class="icon icon-sm" viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2" ry="2"/></svg>
-          Building 2 (8)
+          Academic (8)
         </button>
-        <button class="cam-filter-btn" onclick="filterCams('b3')" id="camf-b3">
+        <button class="cam-filter-btn" onclick="filterCams('lb')" id="camf-lb">
           <svg class="icon icon-sm" viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2" ry="2"/></svg>
-          Building 3 (4)
+          Laboratory (4)
         </button>
       </div>
 

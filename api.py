@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from dynamic_evacuation import (
-    ROOMS, DEVICES, COVERAGE, GATES, BUILDINGS,
+    ROOMS, DEVICES, COVERAGE, GATES, BUILDINGS, BUILDING_NAMES,
     Observation, assess, route, all_routes, route_summary_counts,
     classify_threat, calculate_threat_index,
 )
@@ -71,7 +71,7 @@ def _get_snapshot():
     obs = []
 
     if _state["scenario"] != "all_clear":
-        scenarios = dict(prebaked_scenarios())
+        scenarios = {s["name"]: s["observations"] for s in prebaked_scenarios()}
         label = _state["scenario"]
         if label in scenarios:
             obs = list(scenarios[label])
@@ -276,21 +276,22 @@ async def get_detections():
 @app.get("/api/scenarios")
 async def get_scenarios():
     """Available prebaked drill scenarios."""
-    s = dict(prebaked_scenarios())
-    return {"scenarios": ["all_clear"] + list(s.keys())}
+    scenarios = prebaked_scenarios()
+    return {"scenarios": ["all_clear"] + [s["name"] for s in scenarios]}
 
 
 @app.get("/api/buildings")
 async def get_buildings():
     """Building metadata."""
     out = {}
-    for b_num, (floors, rooms_per_floor) in BUILDINGS.items():
-        out[f"B{b_num}"] = {
-            "building_num": b_num,
+    for b_code, (floors, rooms_per_floor) in BUILDINGS.items():
+        out[b_code] = {
+            "building_code": b_code,
+            "name": BUILDING_NAMES.get(b_code, b_code),
             "floors": floors,
             "rooms_per_floor": rooms_per_floor,
             "total_rooms": floors * rooms_per_floor,
-            "rooms": [f"B{b_num}-F{f}-R{r}" for f in range(1, floors + 1) for r in range(1, rooms_per_floor + 1)],
+            "rooms": [f"{b_code}-F{f}-R{r}" for f in range(1, floors + 1) for r in range(1, rooms_per_floor + 1)],
         }
     return {"buildings": out}
 
@@ -301,7 +302,7 @@ async def get_buildings():
 @app.post("/api/scenario")
 async def set_scenario(req: ScenarioRequest):
     """Load a drill scenario by name."""
-    valid = ["all_clear"] + list(dict(prebaked_scenarios()).keys())
+    valid = ["all_clear"] + [s["name"] for s in prebaked_scenarios()]
     if req.scenario not in valid:
         raise HTTPException(status_code=400, detail=f"Unknown scenario. Valid: {valid}")
     _state["scenario"] = req.scenario
@@ -368,7 +369,7 @@ async def simulate_threat(req: ThreatSimRequest):
 @app.post("/api/upload-video")
 async def upload_video(
     file: UploadFile = File(...),
-    device_ids: str = Form("B1-F1-CAM-L"),
+    device_ids: str = Form("TPB-F1-CAM-L"),
 ):
     """Upload a video file, run YOLOv8 & acoustic threat analysis, update detections.json."""
     dev_list = [d.strip() for d in device_ids.split(",") if d.strip() in DEVICES]

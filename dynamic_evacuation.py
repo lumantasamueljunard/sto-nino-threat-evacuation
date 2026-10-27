@@ -2,7 +2,10 @@
 DEMO ONLY. Costs are illustrative, never a certified life-safety system.
 
 This module is the single source of truth for:
-  - the Sto. Niño SHS demo campus graph (36 rooms, 10 floors, 26 devices),
+  - the Sto. Niño SHS campus graph (36 rooms, 10 floors, 26 devices):
+      * Tech Pro Building (TPB): 4 floors, 5 rooms/floor (20 rooms)
+      * Academic Building (AB): 4 floors, 3 rooms/floor (12 rooms)
+      * Laboratory Building (LB): 2 floors, 2 rooms/floor (4 rooms)
   - pure threat-index math and classification,
   - Observation input and per-snapshot assessment,
   - per-classroom dynamic routing.
@@ -11,9 +14,18 @@ from dataclasses import dataclass
 import networkx as nx
 
 # ---------------------------------------------------------------------------
-# Configuration
+# Configuration & Building Metadata
 # ---------------------------------------------------------------------------
-BUILDINGS = {1: (4, 5), 2: (4, 3), 3: (2, 2)}   # b -> (floors, rooms/floor)
+BUILDINGS = {
+    'TPB': (4, 5),   # Tech Pro Building: 4 floors, 5 rooms/floor (20 rooms)
+    'AB':  (4, 3),   # Academic Building: 4 floors, 3 rooms/floor (12 rooms)
+    'LB':  (2, 2),   # Laboratory Building: 2 floors, 2 rooms/floor (4 rooms)
+}
+BUILDING_NAMES = {
+    'TPB': 'Tech Pro Building',
+    'AB':  'Academic Building',
+    'LB':  'Laboratory Building',
+}
 GATES = ('GATE-W', 'GATE-NE')
 TOTAL_ROOMS = sum(f * r for f, r in BUILDINGS.values())   # 36
 
@@ -41,7 +53,7 @@ def build():
     """Build the canonical campus graph. Node IDs are frozen; do not rename."""
     for b, (floors, count) in BUILDINGS.items():
         for f in range(1, floors + 1):
-            prefix = f'B{b}-F{f}'
+            prefix = f'{b}-F{f}'
 
             # Corridor segments C0..C<count> run along the veranda.
             for i in range(count + 1):
@@ -67,7 +79,7 @@ def build():
                 G.add_node(stair, kind='stair', building=b, floor=f)
                 _edge(stair, f'{prefix}-C{seg}', 1)
                 if f > 1:
-                    _edge(stair, f'B{b}-F{f-1}-STAIR-{side}', 4)
+                    _edge(stair, f'{b}-F{f-1}-STAIR-{side}', 4)
 
             # Two indoor cameras per floor. L covers the leftmost <=3 rooms,
             # R covers the rightmost <=3. Overlap in the middle is intentional.
@@ -80,25 +92,25 @@ def build():
 
         # Outdoor approaches and outdoor cameras (one per building side).
         for side in 'LR':
-            out = f'B{b}-OUT-{side}'
+            out = f'{b}-OUT-{side}'
             G.add_node(out, kind='outdoor', building=b, floor=0)
-            _edge(f'B{b}-F1-STAIR-{side}', out, 1)
-            did = f'B{b}-CAM-OUT-{side}'
+            _edge(f'{b}-F1-STAIR-{side}', out, 1)
+            did = f'{b}-CAM-OUT-{side}'
             DEVICES[did] = {'building': b, 'floor': 0,
                             'zone': 'outdoor', 'side': side}
             COVERAGE[did] = frozenset((out,))
 
-    # Hypothetical outdoor path network — revise against an approved survey.
-    for a, b, w in [
-        ('B1-OUT-L', 'WEST-PATH', 2), ('B3-OUT-L', 'WEST-PATH', 3),
+    # Paved outdoor path network connecting buildings and perimeter gates.
+    for a, b_node, w in [
+        ('TPB-OUT-L', 'WEST-PATH', 2), ('LB-OUT-L', 'WEST-PATH', 3),
         ('WEST-PATH', 'GATE-W', 2),
-        ('B1-OUT-R', 'NORTH-PATH', 2), ('NORTH-PATH', 'GATE-NE', 2),
-        ('B2-OUT-R', 'EAST-PATH', 3), ('EAST-PATH', 'NORTH-PATH', 3),
-        ('B2-OUT-L', 'COURTYARD', 2), ('B3-OUT-R', 'COURTYARD', 2),
+        ('TPB-OUT-R', 'NORTH-PATH', 2), ('NORTH-PATH', 'GATE-NE', 2),
+        ('AB-OUT-R', 'EAST-PATH', 3), ('EAST-PATH', 'NORTH-PATH', 3),
+        ('AB-OUT-L', 'COURTYARD', 2), ('LB-OUT-R', 'COURTYARD', 2),
         ('COURTYARD', 'WEST-PATH', 4), ('COURTYARD', 'EAST-PATH', 4),
-        ('B1-OUT-L', 'COURTYARD', 3), ('B1-OUT-R', 'COURTYARD', 4),
+        ('TPB-OUT-L', 'COURTYARD', 3), ('TPB-OUT-R', 'COURTYARD', 4),
     ]:
-        _edge(a, b, w)
+        _edge(a, b_node, w)
 
     for gate in GATES:
         G.add_node(gate, kind='gate')
@@ -106,7 +118,7 @@ def build():
         G.nodes[n].setdefault('kind', 'outdoor')
 
     # Sanity checks — fail loudly, not silently during the demo.
-    assert len(ROOMS) == TOTAL_ROOMS == 36, 'Room count mismatch'
+    assert len(ROOMS) == TOTAL_ROOMS == 36, f'Room count mismatch: {len(ROOMS)} vs {TOTAL_ROOMS}'
     assert nx.is_connected(G), 'Campus graph must be connected'
     assert all(any(r in COVERAGE[d] for d in DEVICES) for r in ROOMS), \
         'Every classroom must be covered by at least one device'
@@ -202,9 +214,12 @@ def assess(observations, manual_blocks=(), closed_edges=(), unavailable_gates=()
       - Indoor CRITICAL blocks covered rooms, the affected floor's corridor,
         and both stairs on that floor. Upper floors can no longer rely on
         descending through the affected floor.
-      - Outdoor CRITICAL blocks the observed outdoor approach node.
-      - WARNING events become caution zones and are also removed from the
-        routing graph (conservative; documented policy choice).
+      - Gate-W / West Approach threat: Blocks GATE-W, WEST-PATH, and TPB-F1-STAIR-L.
+        Every building can still evacuate towards GATE-NE (TPB uses safe STAIR-R).
+      - Gate-NE / North Approach threat: Blocks GATE-NE, NORTH-PATH, and TPB-F1-STAIR-R.
+        Every building can still evacuate towards GATE-W (TPB uses safe STAIR-L).
+      - Both gates blocked => Campus lockdown; no confirmed route.
+      - WARNING events act as caution zones in this snapshot.
     """
     observations = list(observations)
     _validate(observations)
@@ -251,16 +266,30 @@ def assess(observations, manual_blocks=(), closed_edges=(), unavailable_gates=()
             caution.update(area)
         affected.update(area)
 
-    # Escalate indoor CRITICALs to their entire floor.
+    # Threat escalation:
     for o, area in critical_origins:
         info = DEVICES[o.device_id]
         if info['zone'] == 'indoor':
+            # Indoor CRITICAL: blocks the entire affected floor (corridor + both stairs)
             b, f = info['building'], info['floor']
-            p = f'B{b}-F{f}'
+            p = f'{b}-F{f}'
             blocked.update(f'{p}-C{i}' for i in range(BUILDINGS[b][1] + 1))
             blocked.update((f'{p}-STAIR-L', f'{p}-STAIR-R'))
         else:
-            blocked.update(area)
+            # Outdoor CRITICAL:
+            dev_id = o.device_id
+            b = info.get('building')
+            side = info.get('side')
+            if dev_id == 'TPB-CAM-OUT-L' or 'GATE-W' in area or 'TPB-OUT-L' in area:
+                # Threat at Gate-W: Compromise Gate-W, West-Path, and the adjacent left stair
+                blocked.update(('GATE-W', 'WEST-PATH', 'TPB-OUT-L', 'TPB-F1-STAIR-L'))
+            elif dev_id == 'TPB-CAM-OUT-R' or 'GATE-NE' in area or 'TPB-OUT-R' in area:
+                # Threat at Gate-NE: Compromise Gate-NE, North-Path, and the adjacent right stair
+                blocked.update(('GATE-NE', 'NORTH-PATH', 'TPB-OUT-R', 'TPB-F1-STAIR-R'))
+            else:
+                blocked.update(area)
+                if b and side:
+                    blocked.add(f'{b}-F1-STAIR-{side}')
 
     graph = G.copy()
     graph.remove_nodes_from(blocked | caution)
@@ -277,10 +306,10 @@ def assess(observations, manual_blocks=(), closed_edges=(), unavailable_gates=()
         'raw_detection_count': raw,
         'known_incident_count': len(seen_incidents),
         'known_incident_detection_sum': unique_known,
-        'unique_threat_count': None,   # cannot infer unique people
+        'unique_threat_count': None,
         'possible_threat_locations': sorted(affected),
-        'note': ('Counts are per-video detections, not confirmed distinct '
-                 'threats. WARNING events act as caution zones in this snapshot.'),
+        'note': ('Counts are per-video detections, not confirmed distinct threats. '
+                 'WARNING events act as caution zones in this snapshot.'),
     }
 
 # ---------------------------------------------------------------------------
@@ -289,19 +318,20 @@ def assess(observations, manual_blocks=(), closed_edges=(), unavailable_gates=()
 def _floor_is_threatened(node, danger_nodes):
     """Check whether node's building floor has active threat, blocked corridors or stairs."""
     parts = node.split('-')
-    if len(parts) >= 2 and parts[0].startswith('B') and parts[1].startswith('F'):
-        b_str, f_str = parts[0], parts[1]
-        try:
-            b = int(b_str[1:])
-            rooms = BUILDINGS[b][1]
-            prefix = f'{b_str}-{f_str}'
-            floor_nodes = set()
-            floor_nodes.update(f'{prefix}-C{i}' for i in range(rooms + 1))
-            floor_nodes.update((f'{prefix}-STAIR-L', f'{prefix}-STAIR-R'))
-            floor_nodes.update(f'{prefix}-R{i}' for i in range(1, rooms + 1))
-            return bool(floor_nodes & danger_nodes)
-        except Exception:
-            return False
+    if len(parts) >= 2:
+        b_code = parts[0]
+        f_str = parts[1]
+        if b_code in BUILDINGS and f_str.startswith('F'):
+            try:
+                rooms = BUILDINGS[b_code][1]
+                prefix = f'{b_code}-{f_str}'
+                floor_nodes = set()
+                floor_nodes.update(f'{prefix}-C{i}' for i in range(rooms + 1))
+                floor_nodes.update((f'{prefix}-STAIR-L', f'{prefix}-STAIR-R'))
+                floor_nodes.update(f'{prefix}-R{i}' for i in range(1, rooms + 1))
+                return bool(floor_nodes & danger_nodes)
+            except Exception:
+                return False
     return False
 
 
@@ -407,7 +437,7 @@ if __name__ == '__main__':
     assert classify_threat(10, 15, 5)['level'] == 'NORMAL'
     assert classify_threat(60, 40, 30)['level'] == 'WARNING'
     assert classify_threat(85, 80, 95)['level'] == 'CRITICAL'
-    assert classify_threat(95, 20, 50)['level'] == 'WARNING'   # unverified high
+    assert classify_threat(95, 20, 50)['level'] == 'WARNING'
     assert classify_threat(70, 50, 60)['verified'] is True
 
     # Coverage & baseline.
@@ -417,17 +447,24 @@ if __name__ == '__main__':
     assert all(route(r, assess([], unavailable_gates=GATES))['status']
                == 'NO_CONFIRMED_ROUTE' for r in ROOMS)
 
-    # Simultaneous CRITICALs on B1-F1 -> upper floors isolated.
-    obs = [Observation('e1', 'B1-F1-CAM-L', 'CRITICAL', 2),
-           Observation('e2', 'B1-F1-CAM-R', 'CRITICAL', 1)]
+    # Threat at Gate-W area (TPB-CAM-OUT-L):
+    # Every building can evacuate to GATE-NE!
+    s_gate_w = assess([Observation('e1', 'TPB-CAM-OUT-L', 'CRITICAL', 1)])
+    assert all(route(r, s_gate_w)['status'] == 'MODELED_ROUTE_AVAILABLE' for r in ROOMS)
+    assert all(route(r, s_gate_w)['gate'] == 'GATE-NE' for r in ROOMS)
+    assert any('STAIR-R' in n for n in (route('TPB-F1-R1', s_gate_w)['route'] or []))
+
+    # Indoor CRITICAL on TPB-F1 -> F1 is Red, upper floors Hold (Yellow), AB/LB Green:
+    obs = [Observation('e1', 'TPB-F1-CAM-L', 'CRITICAL', 2),
+           Observation('e2', 'TPB-F1-CAM-R', 'CRITICAL', 1)]
     s = assess(obs)
     assert s['raw_detection_count'] == 3
-    assert route('B1-F4-R3', s)['status'] == 'HOLD_FOR_AUTHORIZED_GUIDANCE'
-    assert route('B1-F1-R1', s)['status'] == 'NO_CONFIRMED_ROUTE'
-    assert route('B2-F4-R2', s)['status'] == 'MODELED_ROUTE_AVAILABLE'
+    assert route('TPB-F4-R3', s)['status'] == 'HOLD_FOR_AUTHORIZED_GUIDANCE'
+    assert route('TPB-F1-R1', s)['status'] == 'NO_CONFIRMED_ROUTE'
+    assert route('AB-F4-R2', s)['status'] == 'MODELED_ROUTE_AVAILABLE'
 
     # Fresh snapshot clears stale threats.
-    assert route('B1-F2-R1', assess([]))['status'] == 'MODELED_ROUTE_AVAILABLE'
+    assert route('TPB-F2-R1', assess([]))['status'] == 'MODELED_ROUTE_AVAILABLE'
 
     # Every camera covers <= 3 rooms; every room is covered.
     assert all(len(COVERAGE[d]) <= 3 for d in DEVICES)

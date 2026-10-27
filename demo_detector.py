@@ -78,41 +78,55 @@ def prebaked_scenarios():
             'observations': [],
         },
         {
-            'name': 'Single CRITICAL at B1 Floor 1 (left camera)',
+            'name': 'Single CRITICAL at Tech Pro Floor 1 (left camera)',
             'observations': [
-                make('e1', 'B1-F1-CAM-L', 85, 80, 95, count=2,
+                make('e1', 'TPB-F1-CAM-L', 85, 80, 95, count=2,
                      incident_id='inc-1'),
             ],
         },
         {
-            'name': 'Two overlapping CRITICAL cameras, same floor',
+            'name': 'Two overlapping CRITICAL cameras, Tech Pro Floor 1',
             'observations': [
-                make('e1', 'B1-F1-CAM-L', 85, 80, 95, count=2,
+                make('e1', 'TPB-F1-CAM-L', 85, 80, 95, count=2,
                      incident_id='inc-1'),
-                make('e2', 'B1-F1-CAM-R', 80, 75, 90, count=1,
+                make('e2', 'TPB-F1-CAM-R', 80, 75, 90, count=1,
                      incident_id='inc-1'),
             ],
         },
         {
-            'name': 'Simultaneous CRITICALs in B1 and B3',
+            'name': 'Simultaneous CRITICALs in Tech Pro and Laboratory',
             'observations': [
-                make('e1', 'B1-F2-CAM-L', 85, 80, 95, count=1,
+                make('e1', 'TPB-F2-CAM-L', 85, 80, 95, count=1,
                      incident_id='inc-A'),
-                make('e2', 'B3-F1-CAM-R', 90, 85, 92, count=1,
+                make('e2', 'LB-F1-CAM-R', 90, 85, 92, count=1,
                      incident_id='inc-B'),
             ],
         },
         {
-            'name': 'CRITICAL outdoor camera — B2 east approach',
+            'name': 'CRITICAL outdoor camera — Academic east approach',
             'observations': [
-                make('e1', 'B2-CAM-OUT-R', 80, 70, 90, count=1,
+                make('e1', 'AB-CAM-OUT-R', 80, 70, 90, count=1,
                      incident_id='inc-outdoor'),
             ],
         },
         {
-            'name': 'WARNING-only — should NOT reroute, only caution',
+            'name': 'CRITICAL at Gate-W perimeter approach (West Gate)',
             'observations': [
-                make('e1', 'B1-F3-CAM-L', 60, 45, 40, count=1),
+                make('e1', 'TPB-CAM-OUT-L', 85, 80, 95, count=1,
+                     incident_id='inc-gate-w'),
+            ],
+        },
+        {
+            'name': 'CRITICAL at Gate-NE perimeter approach (Northeast Gate)',
+            'observations': [
+                make('e1', 'TPB-CAM-OUT-R', 85, 80, 95, count=1,
+                     incident_id='inc-gate-ne'),
+            ],
+        },
+        {
+            'name': 'WARNING-only — Tech Pro Floor 3',
+            'observations': [
+                make('e1', 'TPB-F3-CAM-L', 60, 45, 40, count=1),
             ],
         },
     ]
