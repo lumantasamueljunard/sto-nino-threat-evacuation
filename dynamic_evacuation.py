@@ -286,13 +286,32 @@ def assess(observations, manual_blocks=(), closed_edges=(), unavailable_gates=()
 # ---------------------------------------------------------------------------
 # Routing
 # ---------------------------------------------------------------------------
+def _floor_is_threatened(node, danger_nodes):
+    """Check whether node's building floor has active threat, blocked corridors or stairs."""
+    parts = node.split('-')
+    if len(parts) >= 2 and parts[0].startswith('B') and parts[1].startswith('F'):
+        b_str, f_str = parts[0], parts[1]
+        try:
+            b = int(b_str[1:])
+            rooms = BUILDINGS[b][1]
+            prefix = f'{b_str}-{f_str}'
+            floor_nodes = set()
+            floor_nodes.update(f'{prefix}-C{i}' for i in range(rooms + 1))
+            floor_nodes.update((f'{prefix}-STAIR-L', f'{prefix}-STAIR-R'))
+            floor_nodes.update(f'{prefix}-R{i}' for i in range(1, rooms + 1))
+            return bool(floor_nodes & danger_nodes)
+        except Exception:
+            return False
+    return False
+
+
 def route(room, snapshot, current=None):
     """Return a modeled route for one classroom.
 
     statuses:
-      MODELED_ROUTE_AVAILABLE  -> gate, door, route, cost are set
-      HOLD_FOR_AUTHORIZED_GUIDANCE -> origin is inside a blocked/uncertain area
-      NO_CONFIRMED_ROUTE       -> no path to any available gate
+      MODELED_ROUTE_AVAILABLE       -> gate, door, route, cost are set (GREEN)
+      HOLD_FOR_AUTHORIZED_GUIDANCE  -> isolated/cut-off from descending (YELLOW)
+      NO_CONFIRMED_ROUTE            -> directly threatened room or floor (RED)
     """
     if room not in ROOMS:
         raise ValueError(f'Unknown classroom: {room}')
@@ -301,15 +320,24 @@ def route(room, snapshot, current=None):
     if start not in G:
         raise ValueError(f'Unknown current node: {start}')
 
+    danger = set(snapshot.get('blocked', [])) | set(snapshot.get('caution', []))
+    floor_threatened = _floor_is_threatened(start, danger)
+
+    # If the origin node itself is removed (threat or blocked node)
     if start not in graph:
-        return {'room': room, 'status': 'HOLD_FOR_AUTHORIZED_GUIDANCE',
+        return {'room': room, 'status': 'NO_CONFIRMED_ROUTE',
                 'gate': None, 'door': None, 'route': None, 'cost': None,
-                'reason': 'Origin is inside a blocked or uncertain threat area.'}
+                'reason': 'Room or origin is inside a confirmed or active threat zone.'}
+
+    # If all campus gates are unavailable
+    available_gates = [g for g in GATES if g in graph]
+    if not available_gates:
+        return {'room': room, 'status': 'NO_CONFIRMED_ROUTE',
+                'gate': None, 'door': None, 'route': None, 'cost': None,
+                'reason': 'All campus egress gates are unavailable or blocked.'}
 
     choices = []
-    for gate in GATES:
-        if gate not in graph:
-            continue
+    for gate in available_gates:
         try:
             path = nx.shortest_path(graph, start, gate, weight='weight')
             cost = nx.path_weight(graph, path, weight='weight')
@@ -318,9 +346,14 @@ def route(room, snapshot, current=None):
             pass
 
     if not choices:
-        return {'room': room, 'status': 'NO_CONFIRMED_ROUTE',
-                'gate': None, 'door': None, 'route': None, 'cost': None,
-                'reason': 'No verified modeled path. Follow authorized emergency guidance.'}
+        if floor_threatened:
+            return {'room': room, 'status': 'NO_CONFIRMED_ROUTE',
+                    'gate': None, 'door': None, 'route': None, 'cost': None,
+                    'reason': 'Floor corridor or stairs blocked by active threat.'}
+        else:
+            return {'room': room, 'status': 'HOLD_FOR_AUTHORIZED_GUIDANCE',
+                    'gate': None, 'door': None, 'route': None, 'cost': None,
+                    'reason': 'Descent route blocked by threat on lower level. Hold in place for authorized guidance.'}
 
     cost, gate, path = min(choices, key=lambda x: (x[0], x[1]))
     door = next((n for n in path if n.startswith(room + '-D')), None)
@@ -389,8 +422,8 @@ if __name__ == '__main__':
            Observation('e2', 'B1-F1-CAM-R', 'CRITICAL', 1)]
     s = assess(obs)
     assert s['raw_detection_count'] == 3
-    assert route('B1-F4-R3', s)['status'] == 'NO_CONFIRMED_ROUTE'
-    assert route('B1-F1-R1', s)['status'] == 'HOLD_FOR_AUTHORIZED_GUIDANCE'
+    assert route('B1-F4-R3', s)['status'] == 'HOLD_FOR_AUTHORIZED_GUIDANCE'
+    assert route('B1-F1-R1', s)['status'] == 'NO_CONFIRMED_ROUTE'
     assert route('B2-F4-R2', s)['status'] == 'MODELED_ROUTE_AVAILABLE'
 
     # Fresh snapshot clears stale threats.

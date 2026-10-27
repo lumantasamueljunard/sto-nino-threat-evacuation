@@ -1,46 +1,33 @@
 [
   {
-    "source": "live_video_analysis",
-    "timestamp": "2026-10-27T02:58:03",
-    "device_id": "B1-F1-CAM-L",
-    "event_id": "evt-58c985",
-    "incident_id": "inc-8ac68e",
+    "source": "manual_mock_simulator",
+    "timestamp": "2026-10-27T15:26:05",
+    "device_id": "B1-CAM-OUT-L",
+    "event_id": "sim-873c3d",
+    "incident_id": "inc-bb3880",
     "scores": {
-      "acoustic": 23.55,
-      "pose": 50.0,
-      "object": 50.0
+      "acoustic": 88.0,
+      "pose": 80.0,
+      "object": 92.0
     },
     "object_stats": {
-      "frames_analyzed": 16,
-      "frames_with_person": 16,
-      "frames_with_threat": 0,
-      "detected_classes": [
-        "cell phone",
-        "cup",
-        "frisbee",
-        "person",
-        "skateboard"
-      ]
+      "frames_analyzed": 1,
+      "frames_with_threat": 1
     },
     "pose_stats": {
-      "frames_raised_arms": 1,
-      "pose_score": 50.0
+      "pose_score": 80.0
     },
     "acoustic_stats": {
-      "rms": 0.0471,
-      "peak": 0.7997,
-      "score": 23.55,
-      "has_audio": true,
-      "duration_sec": 15.98
+      "score": 88.0
     },
     "classification": {
-      "acoustic": 23.55,
-      "pose": 50.0,
-      "object": 50.0,
-      "index": 43.39,
-      "supporting_signals": 2,
-      "verified": false,
-      "level": "WARNING"
+      "acoustic": 88.0,
+      "pose": 80.0,
+      "object": 92.0,
+      "index": 87.4,
+      "supporting_signals": 3,
+      "verified": true,
+      "level": "CRITICAL"
     }
   }
 ]

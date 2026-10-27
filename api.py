@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -25,7 +25,10 @@ from dynamic_evacuation import (
     classify_threat, calculate_threat_index,
 )
 from demo_detector import prebaked_scenarios
-from real_detector import load_detections, observations_from_json, clear_detections
+from real_detector import (
+    load_detections, observations_from_json, clear_detections,
+    save_detections, analyze_video_feed,
+)
 
 # ---------------------------------------------------------------------------
 # App Setup
@@ -46,6 +49,10 @@ app.add_middleware(
 # Serve static files (HTML/CSS/JS/Images)
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+VIDEOS_DIR = Path(__file__).parent / "videos-project"
+if VIDEOS_DIR.exists():
+    app.mount("/videos-project", StaticFiles(directory=str(VIDEOS_DIR)), name="videos")
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +111,15 @@ class GateRequest(BaseModel):
 
 class BlockRequest(BaseModel):
     manual_blocks: list[str]
+
+
+class ThreatSimRequest(BaseModel):
+    device_ids: list[str]
+    level: str = "CRITICAL"
+    acoustic: float = 85.0
+    pose: float = 80.0
+    object: float = 92.0
+    incident_id: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -169,14 +185,24 @@ async def get_snapshot():
 
     events_out = []
     for ev in snap.get("events", []):
-        events_out.append({
-            "event_id": ev.event_id,
-            "device_id": ev.device_id,
-            "level": ev.level,
-            "count": ev.count,
-            "location": ev.location,
-            "incident_id": ev.incident_id,
-        })
+        if isinstance(ev, dict):
+            events_out.append({
+                "event_id": ev.get("event_id"),
+                "device_id": ev.get("device") or ev.get("device_id"),
+                "level": ev.get("level"),
+                "count": ev.get("count_in_video") or ev.get("count", 1),
+                "location": ev.get("possible_locations") or ev.get("location"),
+                "incident_id": ev.get("incident_id"),
+            })
+        else:
+            events_out.append({
+                "event_id": getattr(ev, "event_id", ""),
+                "device_id": getattr(ev, "device_id", ""),
+                "level": getattr(ev, "level", "NORMAL"),
+                "count": getattr(ev, "count", 1),
+                "location": getattr(ev, "location", None),
+                "incident_id": getattr(ev, "incident_id", None),
+            })
 
     return {
         "global_status": status,
@@ -223,11 +249,19 @@ async def get_devices():
     """All 26 camera devices with coverage metadata."""
     out = {}
     for dev_id, meta in DEVICES.items():
+        zone = meta.get("zone", "indoor")
+        cov = sorted(list(COVERAGE.get(dev_id, [])))
+        rooms = [r for r in cov if r in ROOMS]
+        node = cov[0] if cov and cov[0] not in ROOMS else None
         out[dev_id] = {
             "device_id": dev_id,
-            "covered_rooms": meta.get("covered_rooms", []),
-            "covered_node": meta.get("covered_node"),
-            "kind": "indoor" if meta.get("covered_rooms") else "outdoor",
+            "building": meta.get("building"),
+            "floor": meta.get("floor"),
+            "side": meta.get("side"),
+            "zone": zone,
+            "kind": zone,
+            "covered_rooms": rooms,
+            "covered_node": node,
         }
     return {"devices": out}
 
@@ -300,6 +334,83 @@ async def reset_state():
     _state["unavailable_gates"] = []
     clear_detections()
     return {"ok": True, "message": "Campus state reset to normal."}
+
+
+@app.post("/api/simulate-threat")
+async def simulate_threat(req: ThreatSimRequest):
+    """Simulate a threat detection on specified camera device(s)."""
+    current_records = load_detections()
+    incident_id = req.incident_id or f"inc-{uuid.uuid4().hex[:6]}"
+    clf = classify_threat(req.acoustic, req.pose, req.object)
+    
+    for did in req.device_ids:
+        if did not in DEVICES:
+            continue
+        rec = {
+            "source": "manual_mock_simulator",
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "device_id": did,
+            "event_id": f"sim-{uuid.uuid4().hex[:6]}",
+            "incident_id": incident_id,
+            "scores": {"acoustic": req.acoustic, "pose": req.pose, "object": req.object},
+            "object_stats": {"frames_analyzed": 1, "frames_with_threat": int(req.object > 50)},
+            "pose_stats": {"pose_score": req.pose},
+            "acoustic_stats": {"score": req.acoustic},
+            "classification": clf,
+        }
+        current_records.append(rec)
+        
+    save_detections(current_records)
+    _state["scenario"] = "all_clear"
+    return {"ok": True, "count": len(req.device_ids), "classification": clf}
+
+
+@app.post("/api/upload-video")
+async def upload_video(
+    file: UploadFile = File(...),
+    device_ids: str = Form("B1-F1-CAM-L"),
+):
+    """Upload a video file, run YOLOv8 & acoustic threat analysis, update detections.json."""
+    dev_list = [d.strip() for d in device_ids.split(",") if d.strip() in DEVICES]
+    if not dev_list:
+        raise HTTPException(status_code=400, detail="No valid device_ids provided.")
+    
+    VIDEOS_DIR.mkdir(exist_ok=True)
+    save_path = VIDEOS_DIR / f"upload_{uuid.uuid4().hex[:6]}_{file.filename}"
+    contents = await file.read()
+    with open(save_path, "wb") as f:
+        f.write(contents)
+        
+    incident_id = f"inc-{uuid.uuid4().hex[:6]}"
+    current_records = load_detections()
+    
+    try:
+        base_rec = analyze_video_feed(
+            str(save_path),
+            device_id=dev_list[0],
+            incident_id=incident_id,
+            sample_frames=20,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Inference error: {str(e)}")
+        
+    for did in dev_list:
+        c_rec = dict(base_rec)
+        c_rec["device_id"] = did
+        c_rec["event_id"] = f"ai-{uuid.uuid4().hex[:6]}"
+        c_rec["video_url"] = f"/videos-project/{save_path.name}"
+        current_records.append(c_rec)
+        
+    save_detections(current_records)
+    _state["scenario"] = "all_clear"
+    return {"ok": True, "devices": dev_list, "records_added": len(dev_list)}
+
+
+@app.post("/api/detections/clear")
+async def clear_detections_endpoint():
+    """Clear all records from detections.json."""
+    clear_detections()
+    return {"ok": True, "message": "All detection records cleared."}
 
 
 # ---------------------------------------------------------------------------

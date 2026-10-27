@@ -161,14 +161,14 @@ check('Raw detection count = 2', s1['raw_detection_count'] == 2)
 check('Known incident count = 1', s1['known_incident_count'] == 1)
 check('unique_threat_count is None (caveat preserved)',
       s1['unique_threat_count'] is None)
-check('Covered room B1-F1-R1 -> HOLD',
-      route('B1-F1-R1', s1)['status'] == 'HOLD_FOR_AUTHORIZED_GUIDANCE')
-check('Covered room B1-F1-R3 -> HOLD',
-      route('B1-F1-R3', s1)['status'] == 'HOLD_FOR_AUTHORIZED_GUIDANCE')
+check('Covered room B1-F1-R1 -> NO_CONFIRMED_ROUTE',
+      route('B1-F1-R1', s1)['status'] == 'NO_CONFIRMED_ROUTE')
+check('Covered room B1-F1-R3 -> NO_CONFIRMED_ROUTE',
+      route('B1-F1-R3', s1)['status'] == 'NO_CONFIRMED_ROUTE')
 check('Uncovered room on same floor B1-F1-R5 -> NO_CONFIRMED_ROUTE (corridor blocked)',
       route('B1-F1-R5', s1)['status'] == 'NO_CONFIRMED_ROUTE')
-check('Upper floor B1-F4-R3 -> NO_CONFIRMED_ROUTE',
-      route('B1-F4-R3', s1)['status'] == 'NO_CONFIRMED_ROUTE')
+check('Upper floor B1-F4-R3 -> HOLD_FOR_AUTHORIZED_GUIDANCE',
+      route('B1-F4-R3', s1)['status'] == 'HOLD_FOR_AUTHORIZED_GUIDANCE')
 check('Different building B2-F4-R2 -> route available',
       route('B2-F4-R2', s1)['status'] == 'MODELED_ROUTE_AVAILABLE')
 
@@ -179,15 +179,15 @@ check('Different building B2-F4-R2 -> route available',
 print('\n== 7. Uncertain location ==')
 obs2 = [Observation('e1', 'B1-F2-CAM-L', 'CRITICAL', 1)]
 s2 = assess(obs2)
-check('All covered rooms -> HOLD',
-      all(route(r, s2)['status'] == 'HOLD_FOR_AUTHORIZED_GUIDANCE'
+check('All covered rooms -> NO_CONFIRMED_ROUTE',
+      all(route(r, s2)['status'] == 'NO_CONFIRMED_ROUTE'
           for r in ['B1-F2-R1', 'B1-F2-R2', 'B1-F2-R3']))
 check('Floor below (B1-F1-R1) still route-able',
       route('B1-F1-R1', s2)['status'] == 'MODELED_ROUTE_AVAILABLE')
-check('Floor above (B1-F3-R1) -> NO_CONFIRMED_ROUTE',
-      route('B1-F3-R1', s2)['status'] == 'NO_CONFIRMED_ROUTE')
-check('Top floor (B1-F4-R1) -> NO_CONFIRMED_ROUTE',
-      route('B1-F4-R1', s2)['status'] == 'NO_CONFIRMED_ROUTE')
+check('Floor above (B1-F3-R1) -> HOLD_FOR_AUTHORIZED_GUIDANCE',
+      route('B1-F3-R1', s2)['status'] == 'HOLD_FOR_AUTHORIZED_GUIDANCE')
+check('Top floor (B1-F4-R1) -> HOLD_FOR_AUTHORIZED_GUIDANCE',
+      route('B1-F4-R1', s2)['status'] == 'HOLD_FOR_AUTHORIZED_GUIDANCE')
 
 
 # ===========================================================================
@@ -205,8 +205,8 @@ check('B2-F4-R2 unaffected -> route available',
       route('B2-F4-R2', s3)['status'] == 'MODELED_ROUTE_AVAILABLE')
 check('B1-F1-R1 (below B1-F2) -> route available',
       route('B1-F1-R1', s3)['status'] == 'MODELED_ROUTE_AVAILABLE')
-check('B1-F4-R3 (above B1-F2) -> NO_CONFIRMED_ROUTE',
-      route('B1-F4-R3', s3)['status'] == 'NO_CONFIRMED_ROUTE')
+check('B1-F4-R3 (above B1-F2) -> HOLD_FOR_AUTHORIZED_GUIDANCE',
+      route('B1-F4-R3', s3)['status'] == 'HOLD_FOR_AUTHORIZED_GUIDANCE')
 
 
 # ===========================================================================
@@ -254,8 +254,8 @@ check('Route does not use the blocked stair',
 # ===========================================================================
 print('\n== 12. Origin threatened ==')
 s5 = assess([Observation('e1', 'B1-F1-CAM-L', 'CRITICAL', 1)])
-check('Origin inside covered area -> HOLD',
-      route('B1-F1-R1', s5)['status'] == 'HOLD_FOR_AUTHORIZED_GUIDANCE')
+check('Origin inside covered area -> NO_CONFIRMED_ROUTE',
+      route('B1-F1-R1', s5)['status'] == 'NO_CONFIRMED_ROUTE')
 
 
 # ===========================================================================
@@ -316,8 +316,8 @@ expect_raises('Unknown edge raises ValueError',
 # ===========================================================================
 print('\n== 15. Reset behaviour ==')
 s_threat = assess([Observation('e1', 'B1-F1-CAM-L', 'CRITICAL', 1)])
-check('Threat snapshot isolates upper floor',
-      route('B1-F4-R3', s_threat)['status'] == 'NO_CONFIRMED_ROUTE')
+check('Threat snapshot isolates upper floor -> HOLD',
+      route('B1-F4-R3', s_threat)['status'] == 'HOLD_FOR_AUTHORIZED_GUIDANCE')
 check('Fresh empty snapshot restores route',
       route('B1-F4-R3', assess([]))['status'] == 'MODELED_ROUTE_AVAILABLE')
 
@@ -330,9 +330,9 @@ s_out = assess([Observation('e1', 'B1-CAM-OUT-L', 'CRITICAL', 1,
                             location='B1-OUT-L')])
 check('Outdoor CRITICAL does not affect room B1-F1-R1 route',
       route('B1-F1-R1', s_out)['status'] == 'MODELED_ROUTE_AVAILABLE')
-check('Occupant currently at blocked node -> HOLD',
+check('Occupant currently at blocked node -> NO_CONFIRMED_ROUTE',
       route('B1-F1-R1', s_out, current='B1-OUT-L')['status']
-      == 'HOLD_FOR_AUTHORIZED_GUIDANCE')
+      == 'NO_CONFIRMED_ROUTE')
 
 
 # ===========================================================================
