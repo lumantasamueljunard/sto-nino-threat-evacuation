@@ -3,602 +3,476 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SENTINEL — Campus Safety Command</title>
-  <link rel="stylesheet" href="/static/style.css" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232563eb' stroke-width='2'><path d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'/></svg>" />
+  <title>SENTINEL — Campus Safety Command · Sto. Niño SHS</title>
+  <link rel="stylesheet" href="/static/style.css?v=4.0" />
 </head>
 <body>
+<div class="app-shell">
 
-<!-- ═══════════════════════════════════════════════════
-     SIDEBAR: EMERGENCY CONTROL PANEL
-════════════════════════════════════════════════════ -->
-<aside id="sidebar">
-
-  <!-- Logo -->
-  <div class="sb-logo">
-    <div style="display:flex; align-items:center; gap:10px;">
-      <svg class="icon icon-lg" viewBox="0 0 24 24" style="color:var(--c-blue); stroke-width:2.2;">
-        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-      </svg>
-      <div>
-        <div class="sb-logo-title">SENTINEL</div>
-        <div class="sb-logo-sub">Campus Safety Command</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Campus Status Beacon Badge -->
-  <div class="sb-section" style="padding-top:16px;">
-    <div class="sb-section-label">Overall Status</div>
-    <div class="sb-status-badge normal" id="sb-status-badge">
-      <div class="sb-status-header">
-        <span class="status-beacon normal" id="sb-beacon"></span>
-        <span class="sb-status-label" id="sb-status-label">ALL CLEAR — Secure</span>
-      </div>
-      <div class="sb-status-sub" id="sb-status-sub">0 active incidents</div>
-    </div>
-  </div>
-
-  <div class="sb-divider"></div>
-
-  <!-- Classroom Evacuation Guide -->
-  <div class="sb-section">
-    <div class="sb-section-label">Classroom Egress Guide</div>
-    <div style="font-size:11px; color:var(--c-sidebar-muted); margin-bottom:8px;">Inspect location guidance:</div>
-    <select class="sb-select" id="sb-room-select">
-      <option value="">Loading classrooms…</option>
-    </select>
-    <div id="sb-egress-card" class="egress-card safe">
-      <div class="egress-step">
-        <svg class="icon icon-md" viewBox="0 0 24 24" style="color:var(--c-green);">
-          <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/>
-        </svg>
-        <span id="egress-door">Select a classroom above</span>
-      </div>
-      <div class="egress-step">
-        <svg class="icon icon-md" viewBox="0 0 24 24" style="color:var(--c-green);">
-          <polyline points="9 18 15 12 9 6"/>
-        </svg>
-        <span id="egress-path">—</span>
-      </div>
-      <div class="egress-step">
-        <svg class="icon icon-md" viewBox="0 0 24 24" style="color:var(--c-green);">
-          <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22v-7"/>
-        </svg>
-        <span id="egress-gate">—</span>
-      </div>
-    </div>
-  </div>
-
-  <div class="sb-divider"></div>
-
-  <!-- Emergency Drills -->
-  <div class="sb-section">
-    <div class="sb-section-label">Emergency Scenarios</div>
-    <select class="sb-select" id="sb-scenario-select">
-      <option value="">Loading…</option>
-    </select>
-  </div>
-
-  <div class="sb-divider"></div>
-
-  <!-- Area & Hazard Closures -->
-  <div class="sb-section">
-    <div class="sb-section-label">Hazard &amp; Area Closures</div>
-    
-    <!-- Gate Closures -->
-    <div style="font-size:11px; color:var(--c-sidebar-muted); margin-bottom:6px;">Emergency Gates:</div>
-    <div class="gate-toggles">
-      <div class="gate-btn open" id="gate-w-btn" onclick="toggleGate('GATE-W')">
-        <span>West Gate</span>
-        <span id="gate-w-status" style="font-size:10px; opacity:0.8;">OPEN</span>
-      </div>
-      <div class="gate-btn open" id="gate-ne-btn" onclick="toggleGate('GATE-NE')">
-        <span>NE Gate</span>
-        <span id="gate-ne-status" style="font-size:10px; opacity:0.8;">OPEN</span>
-      </div>
-    </div>
-
-    <!-- Block Classroom -->
-    <div style="font-size:11px; color:var(--c-sidebar-muted); margin-top:10px; margin-bottom:4px;">Block Classroom:</div>
-    <select class="sb-select" id="sb-block-room" onchange="handleRoomBlock(this.value)">
-      <option value="">+ Block a Classroom…</option>
-    </select>
-
-    <!-- Block Corridor Segment -->
-    <div style="font-size:11px; color:var(--c-sidebar-muted); margin-bottom:4px;">Block Corridor Segment:</div>
-    <select class="sb-select" id="sb-block-corridor" onchange="handleCorridorBlock(this.value)">
-      <option value="">+ Block Corridor Area…</option>
-    </select>
-
-    <!-- Block Specific Stairwell -->
-    <div style="font-size:11px; color:var(--c-sidebar-muted); margin-bottom:4px;">Block Stair Column:</div>
-    <select class="sb-select" id="sb-block-stair" onchange="handleStairBlock(this.value)">
-      <option value="">+ Close a Stairwell…</option>
-    </select>
-
-    <!-- Active Closures Header & List -->
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px; margin-bottom:4px;">
-      <span style="font-size:10px; font-weight:700; color:var(--c-sidebar-muted); text-transform:uppercase;">Active Hazard Closures</span>
-      <button onclick="clearAllBlocks()" style="background:transparent; border:none; color:#fca5a5; font-size:10px; font-weight:700; cursor:pointer;">Clear All</button>
-    </div>
-    <div id="active-closures-container" style="display:flex; flex-wrap:wrap; gap:4px;"></div>
-  </div>
-
-  <div class="sb-divider"></div>
-
-  <!-- Action Controls -->
-  <div class="sb-section">
-    <button class="sb-btn mqtt" onclick="broadcastMQTT()">
-      <svg class="icon" viewBox="0 0 24 24">
-        <path d="M4.93 19.07a10 10 0 0 1 0-14.14M19.07 4.93a10 10 0 0 1 0 14.14M7.76 16.24a6 6 0 0 1 0-8.48M16.24 7.76a6 6 0 0 1 0 8.48"/>
-        <circle cx="12" cy="12" r="2"/>
-      </svg>
-      Broadcast to ESP32 Alarm
-    </button>
-    <button class="sb-btn reset" onclick="resetAll()">
-      <svg class="icon" viewBox="0 0 24 24">
-        <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M3 21v-5h5"/>
-      </svg>
-      Reset All to Normal
-    </button>
-  </div>
-
-  <div class="sb-spacer"></div>
-
-  <!-- Footer -->
-  <div style="padding:14px 20px; border-top:1px solid var(--c-sidebar-border);">
-    <div style="font-size:10px; color:var(--c-sidebar-muted); line-height:1.5;">
-      Capstone Research Prototype.<br>
-      Authorized personnel take precedence.
-    </div>
-  </div>
-</aside>
-
-<!-- ═══════════════════════════════════════════════════
-     MAIN INTERFACE
-════════════════════════════════════════════════════ -->
-<main id="main">
-
-  <!-- Alert Banner for Warnings / Critical Alerts -->
-  <div id="alert-banner">
-    <div style="display:flex; align-items:center; gap:10px;">
-      <svg class="icon icon-md" viewBox="0 0 24 24" style="color:currentColor;">
-        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-      </svg>
-      <span id="alert-banner-text">Alert: Elevated activity detected on campus.</span>
-    </div>
-    <span style="font-size:11px; text-transform:uppercase; letter-spacing:0.06em; opacity:0.85;">Advisory</span>
-  </div>
-
-  <!-- Top Bar (Centered, Prominent, Clean) -->
-  <div id="topbar">
-    <!-- Left: Identity -->
+  <!-- ══ TOPBAR (GEMINI HEADER + PILL NAVIGATION) ══════════════════ -->
+  <header class="topbar">
     <div class="topbar-left">
-      <div>
-        <div class="topbar-title">Sto. Niño Senior High School</div>
-        <div class="topbar-sub">Campus Safety Command</div>
-      </div>
-    </div>
-
-    <!-- Center: Large, Prominent 3-Pill Navigation -->
-    <div class="topbar-center">
-      <nav class="pill-nav">
-        <button class="pill-btn active" onclick="switchTab('map')" id="pill-map">
-          <svg class="icon" viewBox="0 0 24 24">
-            <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/>
-            <line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/>
-          </svg>
-          Campus Floor Plan &amp; Evacuation
-        </button>
-        <button class="pill-btn" onclick="switchTab('data')" id="pill-data">
-          <svg class="icon" viewBox="0 0 24 24">
-            <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
-          </svg>
-          School Data &amp; Intelligence
-        </button>
-        <button class="pill-btn" onclick="switchTab('cctv')" id="pill-cctv">
-          <svg class="icon" viewBox="0 0 24 24">
-            <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
-          </svg>
-          CCTV &amp; Device Feeds
-        </button>
-      </nav>
-    </div>
-
-    <!-- Right: Status, Audio Toggle & Clock -->
-    <div class="topbar-right">
-      <div class="topbar-status">
-        <span class="status-beacon normal" id="topbar-beacon"></span>
-        <span id="topbar-status-text">ALL CLEAR</span>
-      </div>
-
-      <button class="mute-btn" id="mute-btn" onclick="toggleAudio()" title="Toggle Sound Alarms">
-        <svg class="icon icon-sm" id="mute-icon" viewBox="0 0 24 24">
-          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-          <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>
+      <button class="icon-btn-rail" onclick="toggleSidebar()" title="Toggle Command Sidebar">
+        <svg class="icon icon-md" viewBox="0 0 24 24">
+          <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
         </svg>
-        <span id="mute-label">Audio ON</span>
       </button>
-
-      <span class="topbar-time" id="topbar-time">00:00:00</span>
+      <div class="brand-mark">
+        <svg class="icon icon-md" viewBox="0 0 24 24" style="stroke:#fff;">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+      </div>
+      <div class="brand-text-group">
+        <div class="brand-title">
+          SENTINEL
+          <span class="brand-tag">COMMAND</span>
+        </div>
+        <div class="brand-subtitle">Sto. Niño Senior High School &middot; Tacloban City</div>
+      </div>
     </div>
-  </div>
 
-  <!-- Content Area -->
-  <div id="content">
+    <!-- Primary Gemini Pill Navigation -->
+    <nav class="topbar-nav">
+      <button class="nav-pill active" id="tab-btn-map" onclick="switchTab('map')">
+        <svg class="icon icon-sm" viewBox="0 0 24 24">
+          <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/>
+          <line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/>
+        </svg>
+        Map &amp; Blueprints
+      </button>
+      <button class="nav-pill" id="tab-btn-data" onclick="switchTab('data')">
+        <svg class="icon icon-sm" viewBox="0 0 24 24">
+          <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/>
+        </svg>
+        Room Status &amp; Logs
+      </button>
+      <button class="nav-pill" id="tab-btn-cctv" onclick="switchTab('cctv')">
+        <svg class="icon icon-sm" viewBox="0 0 24 24">
+          <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+        </svg>
+        CCTV Matrix
+      </button>
+    </nav>
 
-    <!-- ── PILL 1: CAMPUS MAP & EVACUATION ── -->
-    <div id="tab-map" class="tab-panel active">
-      <!-- Sub-Navigation for Buildings & Map -->
-      <div class="map-subnav">
-        <button class="map-btn active" onclick="switchMapView('campus')" id="mapbtn-campus">
+    <!-- Global Campus Status Pill -->
+    <div class="topbar-right">
+      <div id="global-status-pill" class="global-status-pill">
+        <span id="global-beacon" class="status-beacon"></span>
+        <span id="global-status-text">ALL CLEAR</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ══ MAIN WORKSPACE ════════════════════════════════════════════ -->
+  <div class="main-body">
+
+    <!-- ── GEMINI COLLAPSIBLE SIDEBAR ─────────────────────────── -->
+    <aside class="sidebar" id="app-sidebar">
+
+      <!-- Primary Extended FAB Action Pill -->
+      <div class="sb-hero-action">
+        <button class="btn-gemini-fab" onclick="openUploadModal()">
           <svg class="icon icon-sm" viewBox="0 0 24 24">
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/>
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
           </svg>
-          School Map
+          Upload &amp; Scan Video
         </button>
-        <button class="map-btn" onclick="switchMapView('tpb')" id="mapbtn-tpb">
-          <span class="status-beacon normal" id="dot-tpb" style="width:7px; height:7px;"></span>
-          Tech Pro (TPB)
-        </button>
-        <button class="map-btn" onclick="switchMapView('ab')" id="mapbtn-ab">
-          <span class="status-beacon normal" id="dot-ab" style="width:7px; height:7px;"></span>
-          Academic (AB)
-        </button>
-        <button class="map-btn" onclick="switchMapView('lb')" id="mapbtn-lb">
-          <span class="status-beacon normal" id="dot-lb" style="width:7px; height:7px;"></span>
-          Laboratory (LB)
-        </button>
-
-        <div class="map-legend">
-          <div class="legend-item">
-            <span class="status-beacon normal" style="width:8px; height:8px;"></span> Paved Safe Route
-          </div>
-          <div class="legend-item">
-            <span style="width:8px; height:8px; border-radius:50%; background:var(--c-green); border:1px solid #ffffff;"></span> Emergency Gate
-          </div>
-          <div class="legend-item">
-            <span class="status-beacon critical" style="width:8px; height:8px;"></span> Blocked / Hazard
-          </div>
-          <div class="legend-item">
-            <span style="width:8px; height:8px; border-radius:50%; background:var(--c-navy); border:1px solid #ffffff;"></span> Device Node
-          </div>
-        </div>
       </div>
 
-      <!-- CAMPUS OVERVIEW MAP -->
-      <div id="view-campus" class="map-view">
-        <div class="map-container">
-          <div style="position:relative;">
-            <img src="/static/site_plan.jpg" style="width:100%; display:block;" alt="Campus Architectural Site Plan" />
-            <svg id="campus-overlay" viewBox="0 0 1024 764" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;" xmlns="http://www.w3.org/2000/svg">
-              <defs>
-                <marker id="arr-g" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
-                  <polygon points="0 0, 9 4.5, 0 9" fill="var(--c-green)" />
-                </marker>
-                <marker id="arr-r" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
-                  <polygon points="0 0, 9 4.5, 0 9" fill="var(--c-red)" />
-                </marker>
-                <filter id="glow-g">
-                  <feGaussianBlur stdDeviation="2.5" result="blur"/>
-                  <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-                </filter>
-              </defs>
-
-              <!-- Emergency Gates with Encircled Green Rings (Turned from Violet to Green & Positioned Exact at Gates) -->
-              <!-- West Gate: Exact fence opening x=195, y=405 -->
-              <g id="gate-w-group">
-                <circle id="gate-w-circle" cx="195" cy="405" r="28" fill="none" stroke="var(--c-green)" stroke-width="4.5" stroke-dasharray="6,4" filter="url(#glow-g)">
-                  <animateTransform attributeName="transform" type="rotate" from="0 195 405" to="360 195 405" dur="10s" repeatCount="indefinite"/>
-                </circle>
-                <circle id="gate-w-fill" cx="195" cy="405" r="18" fill="rgba(5, 150, 105, 0.2)"/>
-                <rect x="145" y="442" width="100" height="22" rx="4" fill="#0f172a" opacity="0.95"/>
-                <text id="gate-w-text" x="195" y="457" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="700" font-family="'Plus Jakarta Sans', sans-serif">GATE-W</text>
-              </g>
-
-              <!-- Northeast Gate: Exact diagonal fence opening x=778, y=146 -->
-              <g id="gate-ne-group">
-                <circle id="gate-ne-circle" cx="778" cy="146" r="28" fill="none" stroke="var(--c-green)" stroke-width="4.5" stroke-dasharray="6,4" filter="url(#glow-g)">
-                  <animateTransform attributeName="transform" type="rotate" from="360 778 146" to="0 778 146" dur="10s" repeatCount="indefinite"/>
-                </circle>
-                <circle id="gate-ne-fill" cx="778" cy="146" r="18" fill="rgba(5, 150, 105, 0.2)"/>
-                <rect x="728" y="90" width="100" height="22" rx="4" fill="#0f172a" opacity="0.95"/>
-                <text id="gate-ne-text" x="778" y="105" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="700" font-family="'Plus Jakarta Sans', sans-serif">GATE-NE</text>
-              </g>
-
-              <!-- Dynamic Outdoor Evacuation Paths along Paved Walkways -->
-              <g id="outdoor-paths-container">
-                <!-- Paths rendered dynamically along paved walkways -->
-              </g>
-
-              <!-- Building Labels on Site Plan -->
-              <rect x="260" y="300" width="156" height="22" rx="4" fill="rgba(15, 23, 42, 0.85)"/>
-              <text x="338" y="315" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="700" font-family="'Plus Jakarta Sans', sans-serif">TECH PRO BUILDING (TPB)</text>
-
-              <rect x="620" y="420" width="156" height="22" rx="4" fill="rgba(15, 23, 42, 0.85)"/>
-              <text x="698" y="435" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="700" font-family="'Plus Jakarta Sans', sans-serif">ACADEMIC BUILDING (AB)</text>
-
-              <rect x="300" y="560" width="156" height="22" rx="4" fill="rgba(15, 23, 42, 0.85)"/>
-              <text x="378" y="575" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="700" font-family="'Plus Jakarta Sans', sans-serif">LABORATORY BUILDING (LB)</text>
+      <!-- 1. Drill Scenario & Quick Reset -->
+      <div class="sb-section">
+        <div class="sb-label-row">
+          <span class="sb-title">Drill Scenario</span>
+        </div>
+        <div class="scenario-row">
+          <select id="sb-scenario-select" onchange="onScenarioChange(this.value)"></select>
+          <button class="btn-reset-pill" onclick="resetAll()" title="Reset Campus to All Clear">
+            <svg class="icon icon-sm" viewBox="0 0 24 24">
+              <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
             </svg>
+            Reset
+          </button>
+        </div>
+      </div>
+
+      <!-- 2. Classroom Route Inspector -->
+      <div class="sb-section">
+        <div class="sb-label-row">
+          <span class="sb-title">Route Inspector</span>
+        </div>
+        <select id="sb-room-select" onchange="onRoomInspect(this.value)">
+          <option value="">Select classroom (36 rooms)…</option>
+        </select>
+        <div id="inspector-result" class="inspector-card" style="display:none;">
+          <div id="ins-status-label" class="ins-status">—</div>
+          <div class="ins-grid">
+            <div class="ins-kv">
+              <span class="ins-k">Target Gate</span>
+              <span class="ins-v" id="ins-gate">—</span>
+            </div>
+            <div class="ins-kv">
+              <span class="ins-k">Exit Door</span>
+              <span class="ins-v" id="ins-door">—</span>
+            </div>
+            <div class="ins-kv" style="grid-column: span 2;">
+              <span class="ins-k">Egress Distance</span>
+              <span class="ins-v" id="ins-steps">—</span>
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- BUILDING FLOOR-BY-FLOOR VIEW -->
-      <div id="view-building" class="map-view" style="display:none;">
-        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
-          <div>
-            <h2 class="section-title" id="bld-view-title">Building 1</h2>
-            <p class="section-sub" id="bld-view-sub">Architectural Blueprint &middot; Floor-by-Floor Egress</p>
-          </div>
-          <div id="bld-view-badge" class="badge safe">
-            <span class="status-beacon normal" style="width:7px; height:7px;"></span> All Floors Clear
-          </div>
+      <!-- 3. Perimeter Gates (2-Column Pill Toggles) -->
+      <div class="sb-section">
+        <div class="sb-label-row">
+          <span class="sb-title">Perimeter Gates</span>
         </div>
-        <div class="floor-grid" id="floor-grid">
-          <!-- Dynamically populated floor cards -->
+        <div class="gate-pill-grid">
+          <button id="gate-btn-w" class="gate-pill-btn" onclick="toggleGate('GATE-W')">
+            <div class="gate-pill-top">
+              <span class="gate-pill-id">GATE-W</span>
+              <span class="gate-pill-state" id="gate-status-w">OPEN</span>
+            </div>
+            <span class="gate-pill-sub">West Gate</span>
+          </button>
+          <button id="gate-btn-ne" class="gate-pill-btn" onclick="toggleGate('GATE-NE')">
+            <div class="gate-pill-top">
+              <span class="gate-pill-id">GATE-NE</span>
+              <span class="gate-pill-state" id="gate-status-ne">OPEN</span>
+            </div>
+            <span class="gate-pill-sub">Northeast Gate</span>
+          </button>
         </div>
       </div>
-    </div>
 
-    <!-- ── PILL 2: SCHOOL DATA & INTELLIGENCE ── -->
-    <div id="tab-data" class="tab-panel">
-      <h2 class="section-title">Campus Intelligence</h2>
-      <p class="section-sub">Live status across classrooms, access gates, and detection devices.</p>
+      <!-- 4. Manual Hazard Overrides -->
+      <div class="sb-section">
+        <div class="sb-label-row">
+          <span class="sb-title">Manual Overrides</span>
+          <button id="btn-clear-blocks" onclick="clearBlocks()" style="display:none; background:none; border:none; color:var(--c-red); font-size:11px; font-weight:700; cursor:pointer;">Clear All</button>
+        </div>
+        <div class="hazard-select-grid">
+          <select id="sb-room-block-select" onchange="addBlock(this)">
+            <option value="">+ Block Classroom…</option>
+          </select>
+          <select id="sb-corridor-select" onchange="addBlock(this)">
+            <option value="">+ Block Corridor…</option>
+          </select>
+          <select id="sb-stair-select" onchange="addBlock(this)">
+            <option value="">+ Block Stairwell…</option>
+          </select>
+        </div>
+        <div id="block-tags" class="tag-list"></div>
+      </div>
 
-      <!-- Executive Metric Cards -->
+    </aside>
+
+    <!-- ── MAIN CONTENT CANVAS ────────────────────────────────── -->
+    <main class="content-area">
+
+      <!-- Single-Line Emergency Banner -->
+      <div id="emergency-banner" class="emergency-banner">
+        <div class="eb-left">
+          <span id="eb-beacon" class="status-beacon"></span>
+          <span class="eb-title" id="eb-title">EMERGENCY ACTIVE</span>
+          <span class="eb-sub" id="eb-sub">Dynamic evacuation routes computed across all 36 classrooms.</span>
+        </div>
+        <button class="btn" onclick="resetAll()" style="height:28px; padding:0 12px; font-size:11px;">Clear Alert</button>
+      </div>
+
+      <!-- Fixed-Height 4-Card KPI Strip -->
       <div class="metrics-grid">
         <div class="metric-card">
-          <div class="metric-label">Total Classrooms</div>
-          <div class="metric-value blue">36</div>
-          <div class="metric-sub">10 floor levels</div>
+          <div class="metric-info">
+            <span class="metric-label">Total Rooms</span>
+            <span class="metric-sub">3 Buildings &middot; 10 Floors</span>
+          </div>
+          <span class="metric-val" id="m-total">36</span>
         </div>
-        <div class="metric-card">
-          <div class="metric-label">Safe &amp; Accessible</div>
-          <div class="metric-value green" id="m-safe">—</div>
-          <div class="metric-sub">Egress paths open</div>
+        <div class="metric-card safe-card">
+          <div class="metric-info">
+            <span class="metric-label">Safe Egress</span>
+            <span class="metric-sub">Open Gate Path</span>
+          </div>
+          <span class="metric-val" id="m-safe">36</span>
         </div>
-        <div class="metric-card">
-          <div class="metric-label">Shelter in Place</div>
-          <div class="metric-value amber" id="m-hold">—</div>
-          <div class="metric-sub">Corridor hazard</div>
+        <div class="metric-card hold-card">
+          <div class="metric-info">
+            <span class="metric-label">Hold in Place</span>
+            <span class="metric-sub">Stair / Path Cut Off</span>
+          </div>
+          <span class="metric-val" id="m-hold">0</span>
         </div>
-        <div class="metric-card">
-          <div class="metric-label">Blocked / No Route</div>
-          <div class="metric-value red" id="m-blocked">—</div>
-          <div class="metric-sub">Exits compromised</div>
+        <div class="metric-card threat-card">
+          <div class="metric-info">
+            <span class="metric-label">Threat / Blocked</span>
+            <span class="metric-sub">Compromised Zone</span>
+          </div>
+          <span class="metric-val" id="m-blocked">0</span>
         </div>
       </div>
 
-      <!-- Building Infrastructure Cards -->
-      <div class="building-cards">
-        <div class="building-card">
-          <div class="building-card-name">Tech Pro Building (TPB)</div>
-          <div class="building-card-sub">4 Floors &middot; 20 Classrooms</div>
-          <div class="building-stat"><span>Stair Columns</span><span>2 (Left &amp; Right)</span></div>
-          <div class="building-stat"><span>ESP32 Alarm Nodes</span><span>8 units</span></div>
-          <div class="building-stat"><span>Cameras</span><span>8 indoor</span></div>
-          <div style="margin-top:10px;" id="tpb-badge"><span class="badge safe"><span class="status-beacon normal" style="width:6px; height:6px;"></span> Normal</span></div>
-        </div>
-        <div class="building-card">
-          <div class="building-card-name">Academic Building (AB)</div>
-          <div class="building-card-sub">4 Floors &middot; 12 Classrooms</div>
-          <div class="building-stat"><span>Stair Columns</span><span>2 (Left &amp; Right)</span></div>
-          <div class="building-stat"><span>ESP32 Alarm Nodes</span><span>8 units</span></div>
-          <div class="building-stat"><span>Cameras</span><span>8 indoor</span></div>
-          <div style="margin-top:10px;" id="ab-badge"><span class="badge safe"><span class="status-beacon normal" style="width:6px; height:6px;"></span> Normal</span></div>
-        </div>
-        <div class="building-card">
-          <div class="building-card-name">Laboratory Building (LB)</div>
-          <div class="building-card-sub">2 Floors &middot; 4 Classrooms</div>
-          <div class="building-stat"><span>Stair Columns</span><span>2 (Left &amp; Right)</span></div>
-          <div class="building-stat"><span>ESP32 Alarm Nodes</span><span>4 units</span></div>
-          <div class="building-stat"><span>Cameras</span><span>4 indoor</span></div>
-          <div style="margin-top:10px;" id="lb-badge"><span class="badge safe"><span class="status-beacon normal" style="width:6px; height:6px;"></span> Normal</span></div>
-        </div>
-      </div>
+      <!-- ══ TAB 1: MAP & ARCHITECTURAL BLUEPRINTS ═════════════ -->
+      <div id="tab-map" class="tab-panel active">
 
-      <!-- Gates and Event Log Split -->
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px;">
-        <div class="data-card">
-          <div class="data-card-header">
-            <span class="data-card-title">Emergency Egress Gates</span>
+        <!-- Gemini Filter Pill Switcher + Concise Legend -->
+        <div class="pill-toolbar">
+          <div class="pill-group">
+            <button class="filter-pill active" id="mv-campus" onclick="switchMapView('campus')">
+              Campus Overview
+            </button>
+            <button class="filter-pill" id="mv-tpb" onclick="switchMapView('tpb')">
+              <span class="status-beacon" id="dot-tpb"></span>
+              Tech Pro (TPB)
+            </button>
+            <button class="filter-pill" id="mv-ab" onclick="switchMapView('ab')">
+              <span class="status-beacon" id="dot-ab"></span>
+              Academic (AB)
+            </button>
+            <button class="filter-pill" id="mv-lb" onclick="switchMapView('lb')">
+              <span class="status-beacon" id="dot-lb"></span>
+              Laboratory (LB)
+            </button>
           </div>
-          <div style="padding:14px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid var(--c-border-light);">
-              <span style="font-size:13px; font-weight:700; color:var(--c-text);">West Gate (GATE-W)</span>
-              <span class="badge safe" id="d-gate-w"><span class="status-beacon normal" style="width:6px; height:6px;"></span> OPEN</span>
-            </div>
-            <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0;">
-              <span style="font-size:13px; font-weight:700; color:var(--c-text);">Northeast Gate (GATE-NE)</span>
-              <span class="badge safe" id="d-gate-ne"><span class="status-beacon normal" style="width:6px; height:6px;"></span> OPEN</span>
-            </div>
+
+          <div class="legend-bar">
+            <span class="legend-chip"><span class="legend-dot" style="background:var(--c-green);"></span>Safe Egress</span>
+            <span class="legend-chip"><span class="legend-dot" style="background:var(--c-amber);"></span>Hold in Place</span>
+            <span class="legend-chip"><span class="legend-dot" style="background:var(--c-red);"></span>Threat / Blocked</span>
           </div>
         </div>
 
-        <div class="data-card">
-          <div class="data-card-header">
-            <span class="data-card-title">Incident Activity Log</span>
-          </div>
-          <div style="padding:14px;" id="event-log">
-            <div class="empty-state">
-              <p>No active incidents recorded. Perimeter secure.</p>
+        <!-- VIEW A: Campus Site Plan + 3 Fixed-Height Building Cards -->
+        <div id="map-view-campus" style="display:flex; flex-direction:column; gap:14px;">
+          <div class="map-stage-card">
+            <div class="map-viewport">
+              <div class="map-canvas-wrap">
+                <img src="/static/img/site_plan.jpg" id="campus-base-img" alt="Campus Site Plan" />
+                <svg id="campus-overlay" viewBox="0 0 1024 764" xmlns="http://www.w3.org/2000/svg"></svg>
+              </div>
             </div>
           </div>
+
+          <div class="building-cards">
+            <div class="b-card" onclick="switchMapView('tpb')">
+              <div class="b-card-top">
+                <span class="b-card-title">Tech Pro Building (TPB)</span>
+                <div id="tpb-badge"></div>
+              </div>
+              <div class="b-card-bottom">
+                <span>4 Floors &middot; 20 Classrooms</span>
+                <span class="b-card-cta">Inspect Floors &rarr;</span>
+              </div>
+            </div>
+
+            <div class="b-card" onclick="switchMapView('ab')">
+              <div class="b-card-top">
+                <span class="b-card-title">Academic Building (AB)</span>
+                <div id="ab-badge"></div>
+              </div>
+              <div class="b-card-bottom">
+                <span>4 Floors &middot; 12 Classrooms</span>
+                <span class="b-card-cta">Inspect Floors &rarr;</span>
+              </div>
+            </div>
+
+            <div class="b-card" onclick="switchMapView('lb')">
+              <div class="b-card-top">
+                <span class="b-card-title">Laboratory Building (LB)</span>
+                <div id="lb-badge"></div>
+              </div>
+              <div class="b-card-bottom">
+                <span>2 Floors &middot; 4 Laboratories</span>
+                <span class="b-card-cta">Inspect Floors &rarr;</span>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
 
-      <!-- 36-Classroom Directory Table -->
-      <div class="data-card">
-        <div class="data-card-header">
-          <span class="data-card-title">Classroom Egress Directory</span>
-          <span class="badge safe" id="table-status-badge">
-            <span class="status-beacon normal" style="width:6px; height:6px;"></span> All Routes Verified
-          </span>
+        <!-- VIEW B: Building Floor Blueprints -->
+        <div id="map-view-building" style="display:none; flex-direction:column; gap:14px;">
+          <div class="floor-header-bar">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <h2 id="bld-view-title" style="font-size:15px; font-weight:800; color:var(--c-navy);">Tech Pro Building (TPB)</h2>
+              <span id="bld-view-badge" class="badge safe">Normal</span>
+              <span id="bld-view-sub" style="font-size:11.5px; color:var(--c-muted);">4 Floors &middot; 20 Classrooms</span>
+            </div>
+            <button class="btn" onclick="switchMapView('campus')">
+              &larr; Campus Map
+            </button>
+          </div>
+          <div id="floor-grid" class="floor-grid"></div>
         </div>
-        <div style="overflow-x:auto; max-height:420px; overflow-y:auto;">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Classroom</th>
-                <th>Status</th>
-                <th>Designated Gate</th>
-                <th>Exit Door</th>
-                <th>Path Steps</th>
-              </tr>
-            </thead>
-            <tbody id="rooms-table-body">
-              <tr><td colspan="5" style="text-align:center; color:var(--c-muted); padding:20px;">Loading directory…</td></tr>
-            </tbody>
-          </table>
+
+      </div><!-- /tab-map -->
+
+      <!-- ══ TAB 2: ROOM STATUS & INCIDENT LOGS ════════════════ -->
+      <div id="tab-data" class="tab-panel">
+        <div class="data-split-grid">
+
+          <!-- Classroom Routing Table -->
+          <div class="panel-card">
+            <div class="panel-card-header">
+              <span class="panel-card-title">Classroom Egress Matrix (36 Rooms)</span>
+              <span id="table-status-badge" class="badge safe">NORMAL</span>
+            </div>
+            <div class="table-scroll">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Room</th>
+                    <th>Directive</th>
+                    <th>Target Gate</th>
+                    <th>Exit Door</th>
+                    <th>Steps</th>
+                  </tr>
+                </thead>
+                <tbody id="rooms-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Active Incidents Log -->
+          <div class="panel-card">
+            <div class="panel-card-header">
+              <span class="panel-card-title">Active Detections &amp; Alerts</span>
+              <button class="btn" onclick="clearDetections()" style="height:28px; padding:0 10px; font-size:11px;">Clear Logs</button>
+            </div>
+            <div id="event-log">
+              <div class="empty-state">No active incidents. Campus secure.</div>
+            </div>
+          </div>
+
         </div>
-      </div>
-    </div>
+      </div><!-- /tab-data -->
 
-    <!-- ── PILL 3: CCTV FEEDS ── -->
-    <div id="tab-cctv" class="tab-panel">
-      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px;">
-        <div>
-          <h2 class="section-title">Surveillance &amp; Edge Sensors</h2>
-          <p class="section-sub">Live video inference and multi-modal acoustic-visual sensor telemetry across 26 devices.</p>
+      <!-- ══ TAB 3: CCTV CAMERA MATRIX ═════════════════════════ -->
+      <div id="tab-cctv" class="tab-panel">
+        <div class="pill-toolbar">
+          <div class="pill-group">
+            <button class="filter-pill active" id="camf-outside" onclick="filterCams('outside')">
+              Perimeter &amp; Gates (6)
+            </button>
+            <button class="filter-pill" id="camf-tpb" onclick="filterCams('tpb')">
+              Tech Pro &middot; TPB (8)
+            </button>
+            <button class="filter-pill" id="camf-ab" onclick="filterCams('ab')">
+              Academic &middot; AB (8)
+            </button>
+            <button class="filter-pill" id="camf-lb" onclick="filterCams('lb')">
+              Laboratory &middot; LB (4)
+            </button>
+          </div>
+
+          <div style="display:flex; gap:8px;">
+            <button class="btn btn-tonal" onclick="openUploadModal()">
+              + Upload &amp; Scan Video
+            </button>
+            <button class="btn" onclick="openSimModal()">
+              Quick Simulate
+            </button>
+            <button class="btn" onclick="clearDetections()">
+              Reset Feeds
+            </button>
+          </div>
         </div>
-        <!-- Edge Feed Ingest Toolbar -->
-        <div style="display:flex; gap:8px;">
-          <button class="map-btn" onclick="openSimModal()" style="font-size:11px; padding:6px 12px;">
-            <svg class="icon icon-sm" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-            Simulate Video Threat
-          </button>
-          <button class="map-btn" onclick="openUploadModal()" style="font-size:11px; padding:6px 12px; cursor:pointer;">
-            <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
-            Upload Video
-          </button>
-          <button class="map-btn" onclick="clearDetections()" style="font-size:11px; padding:6px 12px; color:var(--c-red); border-color:var(--c-red-border);">
-            <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-            Clear Detections
-          </button>
-        </div>
-      </div>
 
-      <!-- Camera Filters -->
-      <div class="cam-filter-bar">
-        <button class="cam-filter-btn active" onclick="filterCams('outside')" id="camf-outside">
-          <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 14h-2v-2h2zm0-4h-2V7h2z"/></svg>
-          Ground Perimeter (6)
-        </button>
-        <button class="cam-filter-btn" onclick="filterCams('tpb')" id="camf-tpb">
-          <svg class="icon icon-sm" viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2" ry="2"/></svg>
-          Tech Pro (8)
-        </button>
-        <button class="cam-filter-btn" onclick="filterCams('ab')" id="camf-ab">
-          <svg class="icon icon-sm" viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2" ry="2"/></svg>
-          Academic (8)
-        </button>
-        <button class="cam-filter-btn" onclick="filterCams('lb')" id="camf-lb">
-          <svg class="icon icon-sm" viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2" ry="2"/></svg>
-          Laboratory (4)
-        </button>
-      </div>
+        <div id="cam-grid" class="cam-grid"></div>
+      </div><!-- /tab-cctv -->
 
-      <div class="cam-grid" id="cam-grid">
-        <div style="text-align:center; padding:40px; color:var(--c-muted);">Loading camera monitors…</div>
+    </main>
+  </div>
+</div>
+
+<!-- ══ MODAL 1: FAST 3-CRITERIA VIDEO SCANNER ════════════════════ -->
+<div id="upload-modal" class="modal-backdrop" style="display:none;">
+  <div class="modal-card">
+    <div class="modal-head">
+      <div class="modal-title">
+        <svg class="icon icon-md" viewBox="0 0 24 24" style="color:var(--c-blue);">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        Fast 3-Criteria Video Threat Scanner
+      </div>
+      <button class="icon-btn-rail" onclick="closeUploadModal()" style="width:30px; height:30px;">&times;</button>
+    </div>
+
+    <!-- Scannable 3-Criteria Gatekeeper Cards -->
+    <div class="criteria-grid">
+      <div class="crit-pill-card" id="crit-card-1">
+        <div class="crit-num"><span>Criterion 1</span><span id="crit-badge-1">REQ</span></div>
+        <div class="crit-title">Object Threat</div>
+        <div class="crit-rule" id="crit-val-1">YOLO &ge; 60%</div>
+      </div>
+      <div class="crit-pill-card" id="crit-card-2">
+        <div class="crit-num"><span>Criterion 2</span><span id="crit-badge-2">REQ</span></div>
+        <div class="crit-title">Corroboration</div>
+        <div class="crit-rule" id="crit-val-2">&ge;2 Sigs &ge; 50%</div>
+      </div>
+      <div class="crit-pill-card" id="crit-card-3">
+        <div class="crit-num"><span>Criterion 3</span><span id="crit-badge-3">REQ</span></div>
+        <div class="crit-title">Threat Index</div>
+        <div class="crit-rule" id="crit-val-3">Index &ge; 70.0</div>
       </div>
     </div>
 
-  </div><!-- #content -->
-</main>
-
-<!-- Upload Video & Ingest Camera Feed Modal -->
-<div id="upload-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.65); z-index:9999; align-items:center; justify-content:center;">
-  <div style="background:var(--c-surface); width:490px; max-width:92%; border-radius:var(--radius-lg); padding:24px; box-shadow:var(--shadow-lg); border:1px solid var(--c-border);">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-      <div style="display:flex; align-items:center; gap:8px;">
-        <svg class="icon icon-md" viewBox="0 0 24 24" style="color:var(--c-blue);"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
-        <h3 style="font-size:15px; font-weight:800; color:var(--c-navy); margin:0;">Upload Video &amp; Assign Camera</h3>
-      </div>
-      <button onclick="closeUploadModal()" style="background:none; border:none; font-size:22px; cursor:pointer; color:var(--c-muted); line-height:1;">&times;</button>
+    <div>
+      <label class="sb-title" style="margin-bottom:6px; display:block;">1. Target Camera Node (26 Locations)</label>
+      <select id="modal-upload-device" class="input-select"></select>
     </div>
 
-    <!-- Step 1: Video File Selection -->
-    <div style="margin-bottom:14px;">
-      <label style="display:block; font-size:11px; font-weight:700; color:var(--c-muted); margin-bottom:6px; text-transform:uppercase;">1. Select Video File (Any Video Format):</label>
-      <input type="file" id="modal-video-file" accept="video/*" style="width:100%; font-size:12px; padding:8px; border:1px solid var(--c-border); border-radius:6px; background:#ffffff; color:var(--c-text); box-sizing:border-box;">
-      <div style="font-size:11px; color:var(--c-muted); margin-top:4px;">Supports all video formats for AI threat scanning (MP4 and WebM recommended for live CCTV playback).</div>
+    <div>
+      <label class="sb-title" style="margin-bottom:6px; display:block;">2. Video Evidence File (.mp4, .avi, .mov)</label>
+      <input type="file" id="modal-video-file" accept="video/*"
+        style="width:100%; padding:9px; border:1px dashed var(--c-border); border-radius:var(--r-sm); background:var(--c-surface-2); font-size:12px; cursor:pointer;" />
     </div>
 
-    <!-- Step 2: Target Camera Selection -->
-    <div style="margin-bottom:16px;">
-      <label style="display:block; font-size:11px; font-weight:700; color:var(--c-muted); margin-bottom:6px; text-transform:uppercase;">2. Device Recording This Video:</label>
-      <select class="sb-select" id="modal-upload-device" style="background:#ffffff; color:var(--c-text); border-color:var(--c-border); width:100%;">
-        <!-- Populated via JavaScript dynamically -->
-      </select>
-      <div style="font-size:11px; color:var(--c-muted); margin-top:5px;">
-        If threat criteria pass, the system will mark this camera's zone as threatened and simulate dynamic evacuation routing.
-      </div>
+    <div id="modal-upload-progress" style="display:none; padding:10px 12px; background:var(--c-blue-bg); border:1px solid var(--c-blue-bdr); border-radius:var(--r-sm); color:var(--c-blue); font-size:12px; font-weight:600;">
+      <span id="modal-upload-status">Fast-scanning keyframes &amp; audio track…</span>
     </div>
 
-    <!-- 3-Criteria Notice -->
-    <div style="background:#f8fafc; border:1px solid var(--c-border); border-radius:6px; padding:10px 12px; margin-bottom:16px; font-size:11px; color:var(--c-muted); line-height:1.45;">
-      <strong style="color:var(--c-navy);">Threat Criteria Verification:</strong><br>
-      Evacuation simulation is conducted <em>IF AND ONLY IF</em> the uploaded video surpasses the criteria:
-      <div style="margin-top:4px; display:flex; flex-direction:column; gap:2px;">
-        <span>&bull; <strong>Visual Weapon:</strong> YOLOv8 object score &ge; 60%</span>
-        <span>&bull; <strong>Multi-Signal:</strong> At least 2 signals (Object, Pose, Acoustic) &ge; 50%</span>
-        <span>&bull; <strong>Composite Index:</strong> T = 0.40(O) + 0.35(P) + 0.25(A) &ge; 70.0</span>
-      </div>
-    </div>
+    <div id="modal-scan-result" class="scan-result-box"></div>
 
-    <!-- Progress Indicator -->
-    <div id="modal-upload-progress" style="display:none; margin-bottom:16px; padding:12px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px;">
-      <div style="display:flex; align-items:center; gap:8px;">
-        <svg class="icon icon-sm spin" viewBox="0 0 24 24" style="color:var(--c-blue);"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/></svg>
-        <span style="font-size:12px; font-weight:700; color:var(--c-blue);" id="modal-upload-status">Scanning video frames with YOLOv8 &amp; analyzing audio...</span>
-      </div>
-    </div>
-
-    <!-- Modal Actions -->
-    <div style="display:flex; justify-content:flex-end; gap:8px;">
-      <button class="map-btn" onclick="closeUploadModal()" id="modal-upload-cancel">Cancel</button>
-      <button class="pill-btn active" style="font-size:12px; padding:8px 18px;" id="modal-upload-submit" onclick="submitModalVideoUpload()">Scan &amp; Ingest Feed</button>
+    <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:4px;">
+      <button class="btn" onclick="closeUploadModal()">Close</button>
+      <button id="modal-upload-submit" class="btn btn-primary" onclick="submitModalVideoUpload()">
+        Scan Video Now
+      </button>
     </div>
   </div>
 </div>
 
-<!-- Simulation Feed Modal -->
-<div id="sim-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.6); z-index:9999; align-items:center; justify-content:center;">
-  <div style="background:var(--c-surface); width:460px; max-width:90%; border-radius:var(--radius-lg); padding:24px; box-shadow:var(--shadow-lg); border:1px solid var(--c-border);">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-      <h3 style="font-size:15px; font-weight:800; color:var(--c-navy);">Simulate Video Threat on Camera</h3>
-      <button onclick="closeSimModal()" style="background:none; border:none; font-size:18px; cursor:pointer; color:var(--c-muted);">&times;</button>
+<!-- ══ MODAL 2: QUICK THREAT SIMULATOR ═══════════════════════════ -->
+<div id="sim-modal" class="modal-backdrop" style="display:none;">
+  <div class="modal-card" style="max-width:420px;">
+    <div class="modal-head">
+      <div class="modal-title">Quick Threat Feed Simulator</div>
+      <button class="icon-btn-rail" onclick="closeSimModal()" style="width:30px; height:30px;">&times;</button>
     </div>
-    
-    <div style="margin-bottom:12px;">
-      <label style="display:block; font-size:11px; font-weight:700; color:var(--c-muted); margin-bottom:4px; text-transform:uppercase;">Target Camera Node:</label>
-      <select class="sb-select" id="sim-target-cam" style="background:#ffffff; color:var(--c-text); border-color:var(--c-border);">
-        <!-- Populated via JS -->
+
+    <div>
+      <label class="sb-title" style="margin-bottom:6px; display:block;">Target Camera</label>
+      <select id="sim-target-cam" class="input-select"></select>
+    </div>
+
+    <div>
+      <label class="sb-title" style="margin-bottom:6px; display:block;">Simulated Threat Level</label>
+      <select id="sim-threat-level" class="input-select">
+        <option value="CRITICAL">CRITICAL (Object 92% · Pose 80% · Acoustic 88%)</option>
+        <option value="WARNING">WARNING (Elevated Caution Activity)</option>
       </select>
     </div>
 
-    <div style="margin-bottom:14px;">
-      <label style="display:block; font-size:11px; font-weight:700; color:var(--c-muted); margin-bottom:4px; text-transform:uppercase;">Threat Scenario:</label>
-      <select class="sb-select" id="sim-threat-level" style="background:#ffffff; color:var(--c-text); border-color:var(--c-border);">
-        <option value="CRITICAL">Critical Threat (Weapon Detected &middot; 88% Index)</option>
-        <option value="WARNING">Elevated Warning (Shouting &amp; Agitation &middot; 54% Index)</option>
-        <option value="NORMAL">Normal Ambient (Baseline Nominal &middot; 12% Index)</option>
-      </select>
-    </div>
-
-    <div style="display:flex; justify-content:flex-end; gap:8px;">
-      <button class="map-btn" onclick="closeSimModal()">Cancel</button>
-      <button class="pill-btn active" style="font-size:12px; padding:8px 18px;" onclick="submitSimThreat()">Inject Threat Feed</button>
+    <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:4px;">
+      <button class="btn" onclick="closeSimModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitSimThreat()">Inject Feed</button>
     </div>
   </div>
 </div>
 
-<!-- Slide-in Toast -->
-<div id="toast"></div>
-
-<script src="/static/app.js"></script>
+<div id="toast-container"></div>
+<script src="/static/app.js?v=4.0"></script>
 </body>
 </html>

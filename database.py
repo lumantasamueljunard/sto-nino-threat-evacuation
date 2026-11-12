@@ -453,6 +453,18 @@ def get_evacuation_states(db_path=DB_FILE):
         return out
 
 
+def update_gate_statuses(gate_states, db_path=DB_FILE):
+    """Synchronize real-time gate statuses (OPEN, BLOCKED, COMPROMISED) in campus_gates."""
+    with get_db_connection(db_path) as conn:
+        cursor = conn.cursor()
+        for gate_id, st in gate_states.items():
+            valid_st = st if st in ("OPEN", "BLOCKED", "COMPROMISED") else "BLOCKED"
+            cursor.execute(
+                "UPDATE campus_gates SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE gate_id = ?;",
+                (valid_st, gate_id)
+            )
+
+
 def log_audit(action, actor="SYSTEM", details=None, ip_address=None, db_path=DB_FILE):
     """Record an administrative or operational event in the audit log."""
     det_str = json.dumps(details) if isinstance(details, (dict, list)) else str(details or "")

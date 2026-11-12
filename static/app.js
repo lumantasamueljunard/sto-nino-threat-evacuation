@@ -1,146 +1,70 @@
 /* ============================================================
-   SENTINEL — app.js
-   Campus Safety Command System
-   Strict ISO 7010 semantics, clean SVG vector graphics, zero emojis
+   SENTINEL — Campus Safety Command
+   Frontend Controller (Gemini UI + 1:1 SVG Maps + Fast 3-Criteria Scanner)
    ============================================================ */
 
 const API = '';
 
-// ── Application State ──────────────────────────────────────
 let appState = {
-  tab: 'map',
-  mapView: 'campus',
-  selectedBuilding: null,
-  gatesBlocked: [],
-  manualBlocks: [],
-  camFilter: 'outside',
+  status: null,
   snapshot: null,
+  rooms: [],
   devices: {},
   detections: [],
-  rooms: [],
-  lastStatus: 'NORMAL',
-  audioEnabled: true,
+  scenarios: [],
+  unavailableGates: [],
+  manualBlocks: [],
+  activeTab: 'map',
+  mapView: 'campus',
+  camFilter: 'outside',
 };
 
-// ── Web Audio Synthesizer for Emergency Alerts ────────────
-let audioCtx = null;
-function getAudioContext() {
-  if (!audioCtx) {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  }
-  if (audioCtx.state === 'suspended') {
-    audioCtx.resume();
-  }
-  return audioCtx;
-}
+const CANONICAL_DEVICES = [
+  { id: 'TPB-CAM-OUT-L', grp: 'Campus Perimeter & Gates', label: 'TPB-CAM-OUT-L — West Gate Approach (GATE-W)' },
+  { id: 'TPB-CAM-OUT-R', grp: 'Campus Perimeter & Gates', label: 'TPB-CAM-OUT-R — Northeast Gate Approach (GATE-NE)' },
+  { id: 'AB-CAM-OUT-L',  grp: 'Campus Perimeter & Gates', label: 'AB-CAM-OUT-L — Academic North Courtyard' },
+  { id: 'AB-CAM-OUT-R',  grp: 'Campus Perimeter & Gates', label: 'AB-CAM-OUT-R — Academic East Alley' },
+  { id: 'LB-CAM-OUT-L',  grp: 'Campus Perimeter & Gates', label: 'LB-CAM-OUT-L — Laboratory West Path' },
+  { id: 'LB-CAM-OUT-R',  grp: 'Campus Perimeter & Gates', label: 'LB-CAM-OUT-R — Laboratory Courtyard' },
+  { id: 'TPB-F1-CAM-L', grp: 'Tech Pro Building (TPB)', label: 'TPB-F1-CAM-L (Floor 1 Left — R1, R2, R3)' },
+  { id: 'TPB-F1-CAM-R', grp: 'Tech Pro Building (TPB)', label: 'TPB-F1-CAM-R (Floor 1 Right — R3, R4, R5)' },
+  { id: 'TPB-F2-CAM-L', grp: 'Tech Pro Building (TPB)', label: 'TPB-F2-CAM-L (Floor 2 Left — R1, R2, R3)' },
+  { id: 'TPB-F2-CAM-R', grp: 'Tech Pro Building (TPB)', label: 'TPB-F2-CAM-R (Floor 2 Right — R3, R4, R5)' },
+  { id: 'TPB-F3-CAM-L', grp: 'Tech Pro Building (TPB)', label: 'TPB-F3-CAM-L (Floor 3 Left — R1, R2, R3)' },
+  { id: 'TPB-F3-CAM-R', grp: 'Tech Pro Building (TPB)', label: 'TPB-F3-CAM-R (Floor 3 Right — R3, R4, R5)' },
+  { id: 'TPB-F4-CAM-L', grp: 'Tech Pro Building (TPB)', label: 'TPB-F4-CAM-L (Floor 4 Left — R1, R2, R3)' },
+  { id: 'TPB-F4-CAM-R', grp: 'Tech Pro Building (TPB)', label: 'TPB-F4-CAM-R (Floor 4 Right — R3, R4, R5)' },
+  { id: 'AB-F1-CAM-L', grp: 'Academic Building (AB)', label: 'AB-F1-CAM-L (Floor 1 Left — R1, R2)' },
+  { id: 'AB-F1-CAM-R', grp: 'Academic Building (AB)', label: 'AB-F1-CAM-R (Floor 1 Right — R2, R3)' },
+  { id: 'AB-F2-CAM-L', grp: 'Academic Building (AB)', label: 'AB-F2-CAM-L (Floor 2 Left — R1, R2)' },
+  { id: 'AB-F2-CAM-R', grp: 'Academic Building (AB)', label: 'AB-F2-CAM-R (Floor 2 Right — R2, R3)' },
+  { id: 'AB-F3-CAM-L', grp: 'Academic Building (AB)', label: 'AB-F3-CAM-L (Floor 3 Left — R1, R2)' },
+  { id: 'AB-F3-CAM-R', grp: 'Academic Building (AB)', label: 'AB-F3-CAM-R (Floor 3 Right — R2, R3)' },
+  { id: 'AB-F4-CAM-L', grp: 'Academic Building (AB)', label: 'AB-F4-CAM-L (Floor 4 Left — R1, R2)' },
+  { id: 'AB-F4-CAM-R', grp: 'Academic Building (AB)', label: 'AB-F4-CAM-R (Floor 4 Right — R2, R3)' },
+  { id: 'LB-F1-CAM-L', grp: 'Laboratory Building (LB)', label: 'LB-F1-CAM-L (Floor 1 Left — R1)' },
+  { id: 'LB-F1-CAM-R', grp: 'Laboratory Building (LB)', label: 'LB-F1-CAM-R (Floor 1 Right — R2)' },
+  { id: 'LB-F2-CAM-L', grp: 'Laboratory Building (LB)', label: 'LB-F2-CAM-L (Floor 2 Left — R1)' },
+  { id: 'LB-F2-CAM-R', grp: 'Laboratory Building (LB)', label: 'LB-F2-CAM-R (Floor 2 Right — R2)' },
+];
 
-function playWarningTone() {
-  if (!appState.audioEnabled) return;
-  try {
-    const ctx = getAudioContext();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(587.33, ctx.currentTime);
-    osc.frequency.setValueAtTime(880.00, ctx.currentTime + 0.15);
-    gain.gain.setValueAtTime(0.12, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + 0.35);
-  } catch (e) {
-    console.warn('Audio notice:', e);
-  }
-}
-
-function playEmergencySiren() {
-  if (!appState.audioEnabled) return;
-  try {
-    const ctx = getAudioContext();
-    const now = ctx.currentTime;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(600, now);
-    osc.frequency.linearRampToValueAtTime(1100, now + 0.25);
-    osc.frequency.linearRampToValueAtTime(600, now + 0.5);
-    osc.frequency.linearRampToValueAtTime(1100, now + 0.75);
-    osc.frequency.linearRampToValueAtTime(600, now + 1.0);
-    gain.gain.setValueAtTime(0.15, now);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + 1.0);
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(now);
-    osc.stop(now + 1.0);
-  } catch (e) {
-    console.warn('Siren audio error:', e);
-  }
-}
-
-function toggleAudio() {
-  appState.audioEnabled = !appState.audioEnabled;
-  const btn = document.getElementById('mute-btn');
-  const label = document.getElementById('mute-label');
-  const icon = document.getElementById('mute-icon');
-
-  if (appState.audioEnabled) {
-    btn.classList.remove('active');
-    label.textContent = 'Audio ON';
-    icon.innerHTML = `
-      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-      <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>
-    `;
-    toast('Emergency sound alarms enabled', 'info');
-    getAudioContext();
-  } else {
-    btn.classList.add('active');
-    label.textContent = 'Audio Muted';
-    icon.innerHTML = `
-      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-      <line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>
-    `;
-    toast('Sound alarms muted', 'warning');
-  }
-}
-
-// ── Application Initialization ─────────────────────────────
+// ── Bootstrapping ──────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
-  startClock();
-  await loadRooms();
-  await loadScenarios();
-  await loadDevices();
-  populateBlockDropdowns();
+  await loadInitialMeta();
   await refresh();
-  setInterval(refresh, 5000);
+  setInterval(refresh, 4000);
 });
 
-// ── System Clock ───────────────────────────────────────────
-function startClock() {
-  const el = document.getElementById('topbar-time');
-  const tick = () => {
-    const now = new Date();
-    el.textContent = now.toLocaleTimeString('en-US', { hour12: false });
-    requestAnimationFrame(() => setTimeout(tick, 1000));
-  };
-  tick();
-}
-
-// ── Toast Notifications ────────────────────────────────────
-let toastTimer = null;
-function toast(msg, type = 'info', duration = 3500) {
-  const el = document.getElementById('toast');
-  el.textContent = msg;
-  el.className = `show ${type}`;
-  if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.className = ''; }, duration);
+function toggleSidebar() {
+  const sb = document.getElementById('app-sidebar');
+  if (sb) sb.classList.toggle('collapsed');
 }
 
 // ── API Fetch Helper ───────────────────────────────────────
-async function apiFetch(path, options = {}) {
+async function apiFetch(path, opts = {}) {
   try {
-    const res = await fetch(API + path, options);
-    if (!res.ok) throw new Error(await res.text());
+    const res = await fetch(API + path, opts);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (e) {
     console.error('API Error:', path, e);
@@ -148,724 +72,655 @@ async function apiFetch(path, options = {}) {
   }
 }
 
-// ── Load Dropdowns & Metadata ──────────────────────────────
-async function loadRooms() {
-  const data = await apiFetch('/api/rooms');
-  if (!data) return;
-  appState.rooms = data.rooms;
-
-  const sel = document.getElementById('sb-room-select');
-  sel.innerHTML = data.rooms.map(r =>
-    `<option value="${r}">${formatRoomLabel(r)}</option>`
-  ).join('');
-  sel.addEventListener('change', () => {
-    updateEgressCard(sel.value);
-    if (appState.tab === 'map' && appState.mapView !== 'campus') {
-      renderBuildingFloors(appState.selectedBuilding, appState.snapshot);
-    }
-  });
-  if (data.rooms.length) updateEgressCard(data.rooms[0]);
+function toast(msg, type = 'info') {
+  const c = document.getElementById('toast-container');
+  if (!c) return;
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.innerHTML = `<span class="status-beacon ${type === 'critical' || type === 'error' ? 'critical' : type === 'warning' ? 'warning' : ''}" style="width:7px;height:7px;"></span><span>${msg}</span>`;
+  c.appendChild(el);
+  setTimeout(() => {
+    el.style.opacity = '0';
+    setTimeout(() => el.remove(), 220);
+  }, 3400);
 }
 
-async function loadScenarios() {
-  const data = await apiFetch('/api/scenarios');
-  if (!data) return;
+// ── Initial Metadata Load ──────────────────────────────────
+async function loadInitialMeta() {
+  const [roomsData, devData, scenData] = await Promise.all([
+    apiFetch('/api/rooms'),
+    apiFetch('/api/devices'),
+    apiFetch('/api/scenarios'),
+  ]);
 
-  const sel = document.getElementById('sb-scenario-select');
-  const labels = {
-    all_clear: 'All Clear (Normal Baseline)',
-  };
-  sel.innerHTML = data.scenarios.map(s => {
-    const label = labels[s] || s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-    return `<option value="${s}">${label}</option>`;
-  }).join('');
-
-  sel.addEventListener('change', async () => {
-    const res = await apiFetch('/api/scenario', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scenario: sel.value }),
-    });
-    if (res?.ok) {
-      toast(`Emergency Scenario Loaded: ${sel.options[sel.selectedIndex].text}`, 'info');
-      await refresh();
-    }
-  });
-}
-
-async function loadDevices() {
-  const data = await apiFetch('/api/devices');
-  if (!data) return;
-  appState.devices = data.devices;
-}
-
-// ── Populate Sidebar Hazard Block Selectors ────────────────
-function populateBlockDropdowns() {
-  const roomSel     = document.getElementById('sb-block-room');
-  const stairSel    = document.getElementById('sb-block-stair');
-  const corridorSel = document.getElementById('sb-block-corridor');
-
-  const bMap = {
-    TPB: { name: 'Tech Pro Building', floors: 4, count: 5 },
-    AB:  { name: 'Academic Building', floors: 4, count: 3 },
-    LB:  { name: 'Laboratory Building', floors: 2, count: 2 },
-  };
-
-  // Rooms
-  let roomOpts = '<option value="">+ Block a Classroom…</option>';
-  for (const [bCode, bData] of Object.entries(bMap)) {
-    for (let f = 1; f <= bData.floors; f++) {
-      for (let r = 1; r <= bData.count; r++) {
-        const id = `${bCode}-F${f}-R${r}`;
-        roomOpts += `<option value="${id}">${id} (${bData.name} F${f})</option>`;
-      }
-    }
+  if (roomsData?.rooms) {
+    appState.rooms = roomsData.rooms;
+    populateRoomDropdowns(roomsData.rooms);
   }
-  if (roomSel) roomSel.innerHTML = roomOpts;
-
-  // Corridors
-  let corrOpts = '<option value="">+ Block Corridor Area…</option>';
-  for (const [bCode, bData] of Object.entries(bMap)) {
-    for (let f = 1; f <= bData.floors; f++) {
-      for (let c = 0; c <= bData.count; c++) {
-        const id = `${bCode}-F${f}-C${c}`;
-        const loc = c === 0 ? 'West End' : c === bData.count ? 'East End' : `Bay ${c}`;
-        corrOpts += `<option value="${id}">${bCode}-F${f} Corridor (${loc})</option>`;
-      }
-    }
+  if (devData?.devices) {
+    appState.devices = devData.devices;
   }
-  if (corridorSel) corridorSel.innerHTML = corrOpts;
-
-  // Stairwells
-  let stairOpts = '<option value="">+ Close a Stairwell…</option>';
-  for (const [bCode, bData] of Object.entries(bMap)) {
-    for (let f = 1; f <= bData.floors; f++) {
-      stairOpts += `<option value="${bCode}-F${f}-STAIR-L">${bCode} Floor ${f} Left Stair</option>`;
-      stairOpts += `<option value="${bCode}-F${f}-STAIR-R">${bCode} Floor ${f} Right Stair</option>`;
-    }
+  if (scenData?.scenarios) {
+    appState.scenarios = scenData.scenarios;
+    populateScenarioDropdown(scenData.scenarios);
   }
-  if (stairSel) stairSel.innerHTML = stairOpts;
+  populateHazardDropdowns();
 }
 
-async function handleRoomBlock(roomId) {
-  if (!roomId) return;
-  if (!appState.manualBlocks.includes(roomId)) {
-    appState.manualBlocks.push(roomId);
-    await syncBlocks();
-    toast(`Classroom ${roomId} marked unavailable`, 'warning');
-  }
-  document.getElementById('sb-block-room').value = '';
-}
-
-async function handleCorridorBlock(corrId) {
-  if (!corrId) return;
-  if (!appState.manualBlocks.includes(corrId)) {
-    appState.manualBlocks.push(corrId);
-    await syncBlocks();
-    toast(`Corridor ${corrId} blocked`, 'warning');
-  }
-  document.getElementById('sb-block-corridor').value = '';
-}
-
-async function handleStairBlock(stairId) {
-  if (!stairId) return;
-  if (!appState.manualBlocks.includes(stairId)) {
-    appState.manualBlocks.push(stairId);
-    await syncBlocks();
-    toast(`Stairwell ${stairId} closed for drill`, 'warning');
-  }
-  document.getElementById('sb-block-stair').value = '';
-}
-
-async function clearAllBlocks() {
-  if (!appState.manualBlocks.length) return;
-  appState.manualBlocks = [];
-  await syncBlocks();
-  toast('All hazard closures reopened', 'success');
-}
-
-async function removeBlock(nodeId) {
-  appState.manualBlocks = appState.manualBlocks.filter(n => n !== nodeId);
-  await syncBlocks();
-  toast(`Reopened: ${nodeId}`, 'success');
-}
-
-async function syncBlocks() {
-  const res = await apiFetch('/api/blocks', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ manual_blocks: appState.manualBlocks }),
-  });
-  if (res?.ok) {
-    renderActiveClosures();
-    await refresh();
-  }
-}
-
-function renderActiveClosures() {
-  const container = document.getElementById('active-closures-container');
-  if (!container) return;
-  if (!appState.manualBlocks.length) {
-    container.innerHTML = '<span style="font-size:10px; color:var(--c-sidebar-muted);">No manual blocks active.</span>';
-    return;
-  }
-  container.innerHTML = appState.manualBlocks.map(b => `
-    <span style="background:rgba(220,38,38,0.25); border:1px solid var(--c-red); color:#fca5a5; font-size:10px; font-weight:700; padding:2px 7px; border-radius:10px; display:inline-flex; align-items:center; gap:4px; font-family:'JetBrains Mono',monospace;">
-      ${b}
-      <span style="cursor:pointer; color:#ffffff; font-weight:bold;" onclick="removeBlock('${b}')">&times;</span>
-    </span>
-  `).join('');
-}
-
-// ── Main Refresh Loop ──────────────────────────────────────
 async function refresh() {
-  const [snap, status, detData] = await Promise.all([
-    apiFetch('/api/snapshot'),
+  const [status, snapshot, detData] = await Promise.all([
     apiFetch('/api/status'),
+    apiFetch('/api/snapshot'),
     apiFetch('/api/detections'),
   ]);
 
-  if (snap)    appState.snapshot = snap;
+  if (status) {
+    appState.status = status;
+    appState.unavailableGates = status.unavailable_gates || [];
+    appState.manualBlocks = status.manual_blocks || [];
+  }
+  if (snapshot) appState.snapshot = snapshot;
   if (detData) appState.detections = detData.detections || [];
 
-  if (status) {
-    appState.gatesBlocked = status.unavailable_gates || [];
-    appState.manualBlocks = status.manual_blocks || [];
-    renderActiveClosures();
-    handleStatusChange(status);
-    updateTopBar(status);
-    updateSidebar(status);
-    updateGateControls(status);
-  }
-
-  if (snap) {
-    updateMetrics(snap);
-    updateRoomsTable(snap);
-    updateEventLog(snap);
-    updateBuildingBadges(snap);
-    renderOutdoorPaths(snap);
-    updateEgressCard(document.getElementById('sb-room-select').value);
-  }
-
-  if (appState.tab === 'cctv') {
-    renderCamGrid();
-  }
-
-  if (appState.tab === 'map' && appState.mapView !== 'campus') {
-    renderBuildingFloors(appState.selectedBuilding, snap);
-  }
+  renderAll();
 }
 
-// ── Multi-Modal Status Transition & Alarms ─────────────────
-function handleStatusChange(status) {
-  const curr = status.status;
-  const banner = document.getElementById('alert-banner');
-  const bannerText = document.getElementById('alert-banner-text');
-
-  if (curr !== appState.lastStatus) {
-    if (curr === 'WARNING') {
-      playWarningTone();
-      toast('Security Notice: Elevated threat index detected.', 'warning');
-      banner.style.display = 'flex';
-      banner.className = '';
-      bannerText.textContent = 'Caution: Elevated activity under review. Classrooms maintain standard protocol.';
-    } else if (curr === 'CRITICAL') {
-      playEmergencySiren();
-      toast('EMERGENCY: Active hazard confirmed on campus.', 'error');
-      banner.style.display = 'flex';
-      banner.className = 'critical';
-      bannerText.textContent = 'EMERGENCY: Immediate evacuation order in effect. Avoid compromised zones.';
-    } else {
-      banner.style.display = 'none';
-      if (appState.lastStatus !== 'NORMAL') {
-        toast('Campus perimeter restored to Normal All-Clear.', 'success');
-      }
-    }
-    appState.lastStatus = curr;
-  }
+// ── Populate Sidebar Dropdowns ─────────────────────────────
+function populateScenarioDropdown(scenarios) {
+  const sel = document.getElementById('sb-scenario-select');
+  if (!sel) return;
+  const labels = {
+    'all_clear': 'Normal — All Clear',
+    'Gate-W Threat (Reroute to Gate-NE)': 'Drill: Gate-W Threat -> Reroute NE',
+    'Gate-NE Threat (Reroute to Gate-W)': 'Drill: Gate-NE Threat -> Reroute W',
+    'TPB Floor 1 Indoor Threat': 'Drill: TPB Floor 1 Indoor Threat',
+    'AB Floor 2 Indoor Threat': 'Drill: AB Floor 2 Indoor Threat',
+    'Corridor C2 Caution Zone': 'Drill: Corridor Caution Zone',
+  };
+  sel.innerHTML = scenarios.map(s => `<option value="${s}">${labels[s] || s}</option>`).join('');
 }
 
-// ── Top Bar Updates ────────────────────────────────────────
-function updateTopBar(status) {
-  const beacon = document.getElementById('topbar-beacon');
-  const txt = document.getElementById('topbar-status-text');
-  const lvl = status.status.toLowerCase();
+function populateRoomDropdowns(rooms) {
+  const sel = document.getElementById('sb-room-select');
+  const blockSel = document.getElementById('sb-room-block-select');
+  if (!sel) return;
 
-  beacon.className = `status-beacon ${lvl}`;
-  txt.textContent = status.status === 'NORMAL' ? 'ALL CLEAR' : status.status === 'WARNING' ? 'ELEVATED CAUTION' : 'EMERGENCY ALERT';
-  txt.style.color = lvl === 'critical' ? 'var(--c-red)' : lvl === 'warning' ? 'var(--c-amber)' : 'var(--c-green)';
+  const groups = {
+    'Tech Pro Building (TPB)': rooms.filter(r => r.startsWith('TPB-')),
+    'Academic Building (AB)':  rooms.filter(r => r.startsWith('AB-')),
+    'Laboratory Building (LB)':rooms.filter(r => r.startsWith('LB-')),
+  };
+
+  let html = '<option value="">Select classroom (36 rooms)…</option>';
+  let blockHtml = '<option value="">+ Block Classroom…</option>';
+
+  for (const [grp, list] of Object.entries(groups)) {
+    html += `<optgroup label="${grp}">${list.map(r => `<option value="${r}">${r}</option>`).join('')}</optgroup>`;
+    blockHtml += `<optgroup label="${grp}">${list.map(r => `<option value="${r}">${r}</option>`).join('')}</optgroup>`;
+  }
+  sel.innerHTML = html;
+  if (blockSel) blockSel.innerHTML = blockHtml;
 }
 
-// ── Sidebar Updates ────────────────────────────────────────
-function updateSidebar(status) {
-  const badge  = document.getElementById('sb-status-badge');
-  const beacon = document.getElementById('sb-beacon');
-  const label  = document.getElementById('sb-status-label');
-  const sub    = document.getElementById('sb-status-sub');
-  const lvl = status.status.toLowerCase();
-
-  badge.className = `sb-status-badge ${lvl}`;
-  beacon.className = `status-beacon ${lvl}`;
-  label.textContent = status.status_label;
-  sub.textContent = `${status.known_incidents} active incident${status.known_incidents !== 1 ? 's' : ''}`;
-}
-
-function updateGateControls(status) {
-  const blocked = status.unavailable_gates || [];
-  ['GATE-W', 'GATE-NE'].forEach(g => {
-    const short = g === 'GATE-W' ? 'w' : 'ne';
-    const btn  = document.getElementById(`gate-${short}-btn`);
-    const stat = document.getElementById(`gate-${short}-status`);
-    const isBlocked = blocked.includes(g);
-    btn.className  = `gate-btn ${isBlocked ? 'blocked' : 'open'}`;
-    stat.textContent = isBlocked ? 'BLOCKED' : 'OPEN';
-  });
-
-  const dW  = document.getElementById('d-gate-w');
-  const dNE = document.getElementById('d-gate-ne');
-  if (dW) {
-    dW.className = blocked.includes('GATE-W') ? 'badge blocked' : 'badge safe';
-    dW.innerHTML = `<span class="status-beacon ${blocked.includes('GATE-W') ? 'critical' : 'normal'}" style="width:6px; height:6px;"></span> ${blocked.includes('GATE-W') ? 'BLOCKED' : 'OPEN'}`;
-  }
-  if (dNE) {
-    dNE.className = blocked.includes('GATE-NE') ? 'badge blocked' : 'badge safe';
-    dNE.innerHTML = `<span class="status-beacon ${blocked.includes('GATE-NE') ? 'critical' : 'normal'}" style="width:6px; height:6px;"></span> ${blocked.includes('GATE-NE') ? 'BLOCKED' : 'OPEN'}`;
-  }
-}
-
-// ── Classroom Evacuation Card ──────────────────────────────
-async function updateEgressCard(roomId) {
-  if (!roomId || !appState.snapshot) return;
-  const r = appState.snapshot.routes?.[roomId];
-  if (!r) return;
-
-  const card   = document.getElementById('sb-egress-card');
-  const doorEl = document.getElementById('egress-door');
-  const pathEl = document.getElementById('egress-path');
-  const gateEl = document.getElementById('egress-gate');
-
-  if (r.status === 'MODELED_ROUTE_AVAILABLE') {
-    card.className = 'egress-card safe';
-    doorEl.textContent = `Exit via: ${r.door_label || r.door || 'Designated Door'}`;
-    pathEl.textContent = 'Follow corridor to stairwell and descend';
-    gateEl.textContent = `Assemble at: ${r.gate === 'GATE-W' ? 'West Gate (GATE-W)' : 'Northeast Gate (GATE-NE)'}`;
-  } else if (r.status === 'HOLD_FOR_AUTHORIZED_GUIDANCE') {
-    card.className = 'egress-card warning';
-    doorEl.textContent = 'SHELTER IN PLACE — Hold';
-    pathEl.textContent = 'Corridor egress path has an active hazard';
-    gateEl.textContent = 'Await authorized security instruction';
-  } else {
-    card.className = 'egress-card critical';
-    doorEl.textContent = 'NO CONFIRMED ROUTE AVAILABLE';
-    pathEl.textContent = 'All exit stairwells or gates are compromised';
-    gateEl.textContent = 'Follow instructions from on-site emergency team';
-  }
-}
-
-// ── Gate Toggle Handler ────────────────────────────────────
-async function toggleGate(gateName) {
-  const blocked = [...appState.gatesBlocked];
-  const idx = blocked.indexOf(gateName);
-  if (idx >= 0) blocked.splice(idx, 1);
-  else blocked.push(gateName);
-
-  const res = await apiFetch('/api/gates', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ unavailable_gates: blocked }),
-  });
-  if (res?.ok) {
-    toast(`${gateName} ${blocked.includes(gateName) ? 'marked Blocked' : 'reopened'}`, blocked.includes(gateName) ? 'warning' : 'success');
-    await refresh();
-  }
-}
-
-// ── Reset to All-Clear Baseline ───────────────────────────
-async function resetAll() {
-  const res = await apiFetch('/api/reset', { method: 'POST' });
-  if (res?.ok) {
-    document.getElementById('sb-scenario-select').value = 'all_clear';
-    appState.manualBlocks = [];
-    renderActiveClosures();
-    toast('System baseline restored to All Clear.', 'success');
-    await refresh();
-  }
-}
-
-// ── MQTT Broadcast to ESP32 / Wokwi ────────────────────────
-async function broadcastMQTT() {
-  toast('Broadcasting signal to ESP32 alarm node via MQTT…', 'info');
-  const res = await apiFetch('/api/mqtt/broadcast');
-  if (res?.ok) toast('ESP32 telemetry dispatched successfully.', 'success');
-  else toast('MQTT broadcast failed to connect.', 'error');
-}
-
-// ── Pill Tab Switcher ──────────────────────────────────────
-function switchTab(tab) {
-  appState.tab = tab;
-  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.pill-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById(`tab-${tab}`).classList.add('active');
-  document.getElementById(`pill-${tab}`).classList.add('active');
-
-  if (tab === 'cctv') renderCamGrid();
-  if (tab === 'data' && appState.snapshot) {
-    updateMetrics(appState.snapshot);
-    updateRoomsTable(appState.snapshot);
-  }
-}
-
-// ── Map Sub-Navigation ─────────────────────────────────────
-function switchMapView(view) {
-  ['campus', 'tpb', 'ab', 'lb', 'b1', 'b2', 'b3'].forEach(v => {
-    document.getElementById(`mapbtn-${v}`)?.classList.toggle('active', v === view);
-  });
-
-  appState.mapView = view;
-
-  if (view === 'campus') {
-    document.getElementById('view-campus').style.display = '';
-    document.getElementById('view-building').style.display = 'none';
-    appState.selectedBuilding = null;
-  } else {
-    const codeMap = { tpb: 'TPB', ab: 'AB', lb: 'LB', b1: 'TPB', b2: 'AB', b3: 'LB' };
-    const bCode = codeMap[view] || 'TPB';
-    appState.selectedBuilding = bCode;
-    document.getElementById('view-campus').style.display = 'none';
-    document.getElementById('view-building').style.display = '';
-
-    // Auto-sync sidebar room selector to the currently viewed building
-    const sel = document.getElementById('sb-room-select');
-    if (sel && appState.rooms?.length) {
-      const matchRoom = appState.rooms.find(r => r.startsWith(bCode) || (bCode === 'TPB' && r.startsWith('B1')) || (bCode === 'AB' && r.startsWith('B2')) || (bCode === 'LB' && r.startsWith('B3')));
-      if (matchRoom && !sel.value.startsWith(bCode)) {
-        sel.value = matchRoom;
-        updateEgressCard(matchRoom);
-      }
-    }
-
-    renderBuildingFloors(bCode, appState.snapshot);
-  }
-}
-
-// ── Outdoor Walkway Path Renderer (Obstacle Avoidance) ─────
-function renderOutdoorPaths(snapshot) {
-  const container = document.getElementById('outdoor-paths-container');
-  if (!container) return;
-
-  const wBlocked  = appState.gatesBlocked.includes('GATE-W') || snapshot?.blocked?.includes('GATE-W') || snapshot?.blocked?.includes('WEST-PATH');
-  const neBlocked = appState.gatesBlocked.includes('GATE-NE') || snapshot?.blocked?.includes('GATE-NE') || snapshot?.blocked?.includes('NORTH-PATH');
-
-  const wCircle = document.getElementById('gate-w-circle');
-  const wFill   = document.getElementById('gate-w-fill');
-  const wText   = document.getElementById('gate-w-text');
-  const neCircle = document.getElementById('gate-ne-circle');
-  const neFill   = document.getElementById('gate-ne-fill');
-  const neText   = document.getElementById('gate-ne-text');
-
-  if (wCircle && wText) {
-    wCircle.setAttribute('stroke', wBlocked ? 'var(--c-red)' : 'var(--c-green)');
-    if (wFill) wFill.setAttribute('fill', wBlocked ? 'rgba(220, 38, 38, 0.25)' : 'rgba(5, 150, 105, 0.2)');
-    wText.textContent = wBlocked ? 'GATE-W (BLOCKED)' : 'GATE-W';
-  }
-  if (neCircle && neText) {
-    neCircle.setAttribute('stroke', neBlocked ? 'var(--c-red)' : 'var(--c-green)');
-    if (neFill) neFill.setAttribute('fill', neBlocked ? 'rgba(220, 38, 38, 0.25)' : 'rgba(5, 150, 105, 0.2)');
-    neText.textContent = neBlocked ? 'GATE-NE (BLOCKED)' : 'GATE-NE';
-  }
-
-  if (wBlocked && neBlocked) {
-    container.innerHTML = `
-      <g>
-        <circle cx="512" cy="382" r="28" fill="rgba(220, 38, 38, 0.2)" stroke="var(--c-red)" stroke-width="2"/>
-        <text x="512" y="386" text-anchor="middle" fill="var(--c-red)" font-size="12" font-weight="700" font-family="'Plus Jakarta Sans', sans-serif">ALL GATES BLOCKED</text>
-      </g>
-    `;
-    return;
-  }
-
-  // Check if campus is currently in an active emergency or drill
-  const isEmergency = snapshot?.global_status === 'CRITICAL' || snapshot?.global_status === 'WARNING' || appState.gatesBlocked.length > 0 || appState.manualBlocks.length > 0;
-
-  // During ALL CLEAR (Normal Baseline), do not clutter map with emergency evacuation arrows
-  if (!isEmergency) {
-    container.innerHTML = `
-      <g>
-        <rect x="362" y="22" width="300" height="26" rx="13" fill="#0f172a" opacity="0.9" stroke="var(--c-green)" stroke-width="1.5"/>
-        <circle cx="380" cy="35" r="4.5" fill="var(--c-green)"/>
-        <text x="512" y="39" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="700" font-family="'Plus Jakarta Sans', sans-serif">ALL CLEAR — GATES &amp; WALKWAYS SECURE</text>
-      </g>
-    `;
-    return;
-  }
-
-  const routes = snapshot?.routes || {};
-  const tpbRoutes = Object.entries(routes).filter(([rm]) => rm.startsWith('TPB-') || rm.startsWith('B1-'));
-  const abRoutes  = Object.entries(routes).filter(([rm]) => rm.startsWith('AB-')  || rm.startsWith('B2-'));
-  const lbRoutes  = Object.entries(routes).filter(([rm]) => rm.startsWith('LB-')  || rm.startsWith('B3-'));
-
-  const tpbCanEvacuate = tpbRoutes.some(([, r]) => r.status === 'MODELED_ROUTE_AVAILABLE');
-  const abCanEvacuate  = abRoutes.some(([, r]) => r.status === 'MODELED_ROUTE_AVAILABLE');
-  const lbCanEvacuate  = lbRoutes.some(([, r]) => r.status === 'MODELED_ROUTE_AVAILABLE');
-
-  const tpbHasThreat = tpbRoutes.some(([, r]) => r.status === 'NO_CONFIRMED_ROUTE');
-  const abHasThreat  = abRoutes.some(([, r]) => r.status === 'NO_CONFIRMED_ROUTE');
-  const lbHasThreat  = lbRoutes.some(([, r]) => r.status === 'NO_CONFIRMED_ROUTE');
-
-  // Check which specific stairwell in Tech Pro Building is actively and safely used:
-  const tpbUsesStairL = tpbRoutes.some(([, r]) => r.status === 'MODELED_ROUTE_AVAILABLE' && r.route?.some(n => n.includes('STAIR-L')));
-  const tpbUsesStairR = tpbRoutes.some(([, r]) => r.status === 'MODELED_ROUTE_AVAILABLE' && r.route?.some(n => n.includes('STAIR-R')));
-
-  // Gate destinations chosen for Academic and Laboratory buildings:
-  const abGate = abRoutes.find(([, r]) => r.status === 'MODELED_ROUTE_AVAILABLE')?.[1]?.gate;
-  const lbGate = lbRoutes.find(([, r]) => r.status === 'MODELED_ROUTE_AVAILABLE')?.[1]?.gate;
-
-  let pathsHtml = '';
-
-  // 1. Tech Pro Building Left Stair Egress (only if Stair L is actively and safely used)
-  if (tpbUsesStairL && !wBlocked) {
-    pathsHtml += `
-      <path d="M 240 395 L 235 405 L 195 405" fill="none" stroke="var(--c-green)" stroke-width="6" stroke-dasharray="10,6" filter="url(#glow-g)" marker-end="url(#arr-g)">
-        <animate attributeName="stroke-dashoffset" from="32" to="0" dur="0.9s" repeatCount="indefinite"/>
-      </path>`;
-  }
-
-  // 2. Tech Pro Building Right Stair Egress (only if Stair R is actively and safely used)
-  if (tpbUsesStairR && !neBlocked) {
-    pathsHtml += `
-      <path d="M 630 310 L 690 210 L 750 160 L 778 146" fill="none" stroke="var(--c-green)" stroke-width="6" stroke-dasharray="10,6" filter="url(#glow-g)" marker-end="url(#arr-g)">
-        <animate attributeName="stroke-dashoffset" from="32" to="0" dur="0.8s" repeatCount="indefinite"/>
-      </path>`;
-  }
-
-  // 3. Academic Building Egress (follows its modeled safe gate):
-  if (abCanEvacuate) {
-    if (abGate === 'GATE-NE' && !neBlocked) {
-      pathsHtml += `
-        <path d="M 640 450 L 630 350 L 660 240 L 750 160 L 778 146" fill="none" stroke="var(--c-green)" stroke-width="6" stroke-dasharray="10,6" filter="url(#glow-g)" marker-end="url(#arr-g)">
-          <animate attributeName="stroke-dashoffset" from="32" to="0" dur="1.1s" repeatCount="indefinite"/>
-        </path>`;
-    } else if (abGate === 'GATE-W' && !wBlocked) {
-      pathsHtml += `
-        <path d="M 640 480 L 580 480 L 460 450 L 330 405 L 195 405" fill="none" stroke="var(--c-green)" stroke-width="6" stroke-dasharray="10,6" filter="url(#glow-g)" marker-end="url(#arr-g)">
-          <animate attributeName="stroke-dashoffset" from="32" to="0" dur="1.2s" repeatCount="indefinite"/>
-        </path>`;
-    }
-  }
-
-  // 4. Laboratory Building Egress (follows its modeled safe gate):
-  if (lbCanEvacuate) {
-    if (lbGate === 'GATE-W' && !wBlocked) {
-      pathsHtml += `
-        <path d="M 420 500 L 330 405 L 195 405" fill="none" stroke="var(--c-green)" stroke-width="6" stroke-dasharray="10,6" filter="url(#glow-g)" marker-end="url(#arr-g)">
-          <animate attributeName="stroke-dashoffset" from="32" to="0" dur="0.9s" repeatCount="indefinite"/>
-        </path>`;
-    } else if (lbGate === 'GATE-NE' && !neBlocked) {
-      pathsHtml += `
-        <path d="M 420 500 L 460 460 L 600 450 L 660 350 L 690 210 L 750 160 L 778 146" fill="none" stroke="var(--c-green)" stroke-width="6" stroke-dasharray="10,6" filter="url(#glow-g)" marker-end="url(#arr-g)">
-          <animate attributeName="stroke-dashoffset" from="32" to="0" dur="1.3s" repeatCount="indefinite"/>
-        </path>`;
-    }
-  }
-
-  // 6 Ground-Floor Perimeter Camera Devices (Ground Level Only)
-  const outdoorCams = [
-    { id: 'TPB-OUT-L', x: 200, y: 425 },
-    { id: 'TPB-OUT-R', x: 720, y: 225 },
-    { id: 'AB-OUT-L',  x: 670, y: 495 },
-    { id: 'AB-OUT-R',  x: 750, y: 360 },
-    { id: 'LB-OUT-L',  x: 300, y: 535 },
-    { id: 'LB-OUT-R',  x: 440, y: 560 },
+function populateHazardDropdowns() {
+  const corrSel = document.getElementById('sb-corridor-select');
+  const stairSel = document.getElementById('sb-stair-select');
+  const bldgs = [
+    { code: 'TPB', name: 'Tech Pro (TPB)', floors: 4, rpf: 5 },
+    { code: 'AB',  name: 'Academic (AB)',  floors: 4, rpf: 3 },
+    { code: 'LB',  name: 'Laboratory (LB)',floors: 2, rpf: 2 },
   ];
 
-  let outdoorCamBadges = '';
-  outdoorCams.forEach(c => {
-    const hasThreat = appState.detections.find(d => d.device_id === c.id || d.device_id === c.id.replace('TPB', 'B1').replace('AB', 'B2').replace('LB', 'B3'));
-    const lvl = hasThreat?.classification?.level || 'NORMAL';
-    const isBlocked = snapshot?.blocked?.includes(c.id);
-    const isCaution = snapshot?.caution?.includes(c.id);
-    const dotCol = (lvl === 'CRITICAL' || isBlocked) ? 'var(--c-red)' : (lvl === 'WARNING' || isCaution) ? 'var(--c-amber)' : 'var(--c-green)';
-    outdoorCamBadges += `
-      <g>
-        <rect x="${c.x}" y="${c.y}" width="98" height="24" rx="4" fill="#0f172a" stroke="#334155" stroke-width="1.5" opacity="0.95"/>
-        <circle cx="${c.x + 12}" cy="${c.y + 12}" r="4.5" fill="${dotCol}"/>
-        <text x="${c.x + 24}" y="${c.y + 16}" fill="#ffffff" font-size="10" font-weight="700" font-family="'JetBrains Mono', monospace">${c.id}</text>
+  if (corrSel) {
+    let html = '<option value="">+ Block Corridor…</option>';
+    bldgs.forEach(b => {
+      let opts = '';
+      for (let f = 1; f <= b.floors; f++) {
+        for (let c = 0; c <= b.rpf; c++) {
+          const id = `${b.code}-F${f}-C${c}`;
+          opts += `<option value="${id}">${id} (Floor ${f} Seg ${c})</option>`;
+        }
+      }
+      html += `<optgroup label="${b.name}">${opts}</optgroup>`;
+    });
+    corrSel.innerHTML = html;
+  }
+
+  if (stairSel) {
+    let html = '<option value="">+ Block Stairwell…</option>';
+    bldgs.forEach(b => {
+      let opts = '';
+      for (let f = 1; f <= b.floors; f++) {
+        opts += `<option value="${b.code}-F${f}-STAIR-L">${b.code}-F${f}-STAIR-L (Floor ${f} Left)</option>`;
+        opts += `<option value="${b.code}-F${f}-STAIR-R">${b.code}-F${f}-STAIR-R (Floor ${f} Right)</option>`;
+      }
+      html += `<optgroup label="${b.name}">${opts}</optgroup>`;
+    });
+    stairSel.innerHTML = html;
+  }
+}
+
+// ── Master Render ──────────────────────────────────────────
+function renderAll() {
+  const { status, snapshot } = appState;
+  if (!status || !snapshot) return;
+
+  updateTopbarStatus(status, snapshot);
+  updateSidebarControls(status);
+  updateMetrics(snapshot);
+  updateBuildingBadges(snapshot);
+
+  const selectedRoom = document.getElementById('sb-room-select')?.value;
+  if (selectedRoom) updateRoomInspectorCard(selectedRoom);
+
+  if (appState.mapView === 'campus') {
+    renderCampusMap(snapshot, status);
+  } else {
+    renderBuildingFloors(appState.mapView, snapshot);
+  }
+
+  updateRoomsTable(snapshot);
+  updateEventLog(snapshot);
+  renderCamGrid();
+}
+
+// ── Topbar & Emergency Banner ──────────────────────────────
+function updateTopbarStatus(status, snapshot) {
+  const pill = document.getElementById('global-status-pill');
+  const beacon = document.getElementById('global-beacon');
+  const text = document.getElementById('global-status-text');
+  const banner = document.getElementById('emergency-banner');
+  const ebBeacon = document.getElementById('eb-beacon');
+  const ebTitle = document.getElementById('eb-title');
+  const ebSub = document.getElementById('eb-sub');
+
+  const lvl = (snapshot.global_status || status.status || 'NORMAL').toUpperCase();
+
+  pill.className = 'global-status-pill';
+  beacon.className = 'status-beacon';
+
+  if (lvl === 'CRITICAL') {
+    pill.classList.add('critical');
+    beacon.classList.add('critical');
+    text.textContent = 'EMERGENCY · EVACUATE';
+    banner.className = 'emergency-banner visible';
+    ebBeacon.className = 'status-beacon critical';
+    ebTitle.textContent = 'CRITICAL THREAT ACTIVE';
+    ebSub.textContent = `${snapshot.counts?.['MODELED_ROUTE_AVAILABLE'] ?? 0} rooms evacuating · ${snapshot.counts?.['HOLD_FOR_AUTHORIZED_GUIDANCE'] ?? 0} holding · ${snapshot.counts?.['NO_CONFIRMED_ROUTE'] ?? 0} compromised.`;
+  } else if (lvl === 'WARNING') {
+    pill.classList.add('warning');
+    beacon.classList.add('warning');
+    text.textContent = 'CAUTION · REROUTING';
+    banner.className = 'emergency-banner warning visible';
+    ebBeacon.className = 'status-beacon warning';
+    ebTitle.textContent = 'ELEVATED CAUTION / OVERRIDE ACTIVE';
+    ebSub.textContent = 'Dynamic rerouting engaged around restricted zones or gates.';
+  } else {
+    text.textContent = 'ALL CLEAR · SECURE';
+    banner.className = 'emergency-banner';
+  }
+}
+
+// ── Sidebar Controls Sync ──────────────────────────────────
+function updateSidebarControls(status) {
+  const scenSel = document.getElementById('sb-scenario-select');
+  if (scenSel && status.active_scenario) {
+    scenSel.value = status.active_scenario;
+  }
+
+  const gateStates = status.gates || {};
+  const wBlocked = gateStates['GATE-W'] === 'BLOCKED' || appState.unavailableGates.includes('GATE-W');
+  const neBlocked = gateStates['GATE-NE'] === 'BLOCKED' || appState.unavailableGates.includes('GATE-NE');
+
+  const btnW = document.getElementById('gate-btn-w');
+  const stW = document.getElementById('gate-status-w');
+  if (btnW && stW) {
+    btnW.className = `gate-pill-btn ${wBlocked ? 'blocked' : ''}`;
+    stW.textContent = wBlocked ? 'BLOCKED' : 'OPEN';
+  }
+
+  const btnNE = document.getElementById('gate-btn-ne');
+  const stNE = document.getElementById('gate-status-ne');
+  if (btnNE && stNE) {
+    btnNE.className = `gate-pill-btn ${neBlocked ? 'blocked' : ''}`;
+    stNE.textContent = neBlocked ? 'BLOCKED' : 'OPEN';
+  }
+
+  const tagsEl = document.getElementById('block-tags');
+  const clearBtn = document.getElementById('btn-clear-blocks');
+  if (tagsEl) {
+    tagsEl.innerHTML = appState.manualBlocks.map(node => `
+      <span class="tag-chip">
+        ${node}
+        <button onclick="removeBlock('${node}')" title="Unblock">&times;</button>
+      </span>
+    `).join('');
+  }
+  if (clearBtn) {
+    clearBtn.style.display = appState.manualBlocks.length ? 'inline-block' : 'none';
+  }
+}
+
+// ── Interactive Control Actions ────────────────────────────
+function switchTab(tab) {
+  appState.activeTab = tab;
+  document.querySelectorAll('.nav-pill').forEach(b => b.classList.remove('active'));
+  document.getElementById(`tab-btn-${tab}`)?.classList.add('active');
+
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById(`tab-${tab}`)?.classList.add('active');
+}
+
+function switchMapView(view) {
+  appState.mapView = view;
+  document.querySelectorAll('#tab-map .filter-pill').forEach(b => b.classList.remove('active'));
+  document.getElementById(`mv-${view}`)?.classList.add('active');
+
+  const campusView = document.getElementById('map-view-campus');
+  const bldView = document.getElementById('map-view-building');
+
+  if (view === 'campus') {
+    campusView.style.display = 'flex';
+    bldView.style.display = 'none';
+    if (appState.snapshot && appState.status) {
+      renderCampusMap(appState.snapshot, appState.status);
+    }
+  } else {
+    campusView.style.display = 'none';
+    bldView.style.display = 'flex';
+    if (appState.snapshot) {
+      renderBuildingFloors(view, appState.snapshot);
+    }
+  }
+}
+
+async function onScenarioChange(scenario) {
+  await apiFetch('/api/scenario', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scenario }),
+  });
+  toast(`Scenario loaded: ${scenario === 'all_clear' ? 'All Clear' : scenario}`, 'info');
+  await refresh();
+}
+
+function onRoomInspect(roomId) {
+  const card = document.getElementById('inspector-result');
+  if (!roomId) {
+    if (card) card.style.display = 'none';
+    return;
+  }
+  updateRoomInspectorCard(roomId);
+  const bCode = roomId.split('-')[0].toLowerCase();
+  if (['tpb', 'ab', 'lb'].includes(bCode)) {
+    switchMapView(bCode);
+  }
+}
+
+function updateRoomInspectorCard(roomId) {
+  const card = document.getElementById('inspector-result');
+  const r = appState.snapshot?.routes?.[roomId];
+  if (!card || !r) return;
+
+  card.style.display = 'block';
+  const isSafe = r.status === 'MODELED_ROUTE_AVAILABLE';
+  const isHold = r.status === 'HOLD_FOR_AUTHORIZED_GUIDANCE';
+
+  card.className = `inspector-card ${isSafe ? '' : isHold ? 'warning' : 'critical'}`;
+  setText('ins-status-label', isSafe ? 'SAFE EVACUATION ROUTE' : isHold ? 'HOLD IN PLACE (ISOLATED)' : 'THREAT AREA / BLOCKED');
+  setText('ins-gate', r.gate || 'NONE');
+  setText('ins-door', r.door_label || 'NONE');
+  setText('ins-steps', r.route?.length ? `${r.route.length} graph nodes (Cost ${r.cost})` : (r.reason || 'No route available'));
+}
+
+async function toggleGate(gateId) {
+  const list = [...appState.unavailableGates];
+  const idx = list.indexOf(gateId);
+  if (idx >= 0) list.splice(idx, 1);
+  else list.push(gateId);
+
+  await apiFetch('/api/gates', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ unavailable_gates: list }),
+  });
+  toast(`${gateId} ${idx >= 0 ? 're-opened' : 'manually blocked'}`, idx >= 0 ? 'success' : 'warning');
+  await refresh();
+}
+
+async function addBlock(selectEl) {
+  const node = selectEl.value;
+  selectEl.value = '';
+  if (!node || appState.manualBlocks.includes(node)) return;
+
+  const next = [...appState.manualBlocks, node];
+  await apiFetch('/api/blocks', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ manual_blocks: next }),
+  });
+  toast(`Blocked node: ${node}`, 'warning');
+  await refresh();
+}
+
+async function removeBlock(node) {
+  const next = appState.manualBlocks.filter(n => n !== node);
+  await apiFetch('/api/blocks', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ manual_blocks: next }),
+  });
+  await refresh();
+}
+
+async function clearBlocks() {
+  await apiFetch('/api/blocks', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ manual_blocks: [] }),
+  });
+  toast('Manual overrides cleared', 'info');
+  await refresh();
+}
+
+async function resetAll() {
+  await apiFetch('/api/reset', { method: 'POST' });
+  const rmSel = document.getElementById('sb-room-select');
+  if (rmSel) rmSel.value = '';
+  const insCard = document.getElementById('inspector-result');
+  if (insCard) insCard.style.display = 'none';
+  toast('Campus reset to Normal All-Clear state', 'success');
+  await refresh();
+}
+
+// ── Shorten Final Segment of SVG Path so Arrowhead Never Overlaps Gate Circle ──
+function shortenPathEnd(points, trimPx = 28) {
+  if (points.length < 2) return '';
+  const pts = points.map(p => [...p]);
+  const last = pts[pts.length - 1];
+  const prev = pts[pts.length - 2];
+  const dx = last[0] - prev[0];
+  const dy = last[1] - prev[1];
+  const len = Math.hypot(dx, dy);
+  if (len > trimPx + 6) {
+    last[0] = Math.round(last[0] - (dx / len) * trimPx);
+    last[1] = Math.round(last[1] - (dy / len) * trimPx);
+  }
+  return pts.map((pt, idx) => `${idx === 0 ? 'M' : 'L'} ${pt[0]} ${pt[1]}`).join(' ');
+}
+
+// ── Render Campus Site Plan SVG Overlay (Zero Clipping) ────
+function renderCampusMap(snapshot, status) {
+  const svg = document.getElementById('campus-overlay');
+  if (!svg) return;
+
+  const isEmergency = snapshot.global_status === 'CRITICAL' || snapshot.global_status === 'WARNING';
+  const blockedSet = new Set(snapshot.blocked || []);
+
+  const gateCoords = {
+    'GATE-W':  { x: 195, y: 405, label: 'GATE-W · West Exit' },
+    'GATE-NE': { x: 778, y: 146, label: 'GATE-NE · Northeast Exit' },
+  };
+
+  const bldConfigs = [
+    {
+      code: 'TPB', title: 'TECH PRO (TPB)',
+      cx: 485, cy: 235, w: 185, h: 66,
+      paths: {
+        'GATE-W':  [[390, 250], [285, 315], [195, 405]],
+        'GATE-NE': [[580, 225], [685, 185], [778, 146]],
+      }
+    },
+    {
+      code: 'AB', title: 'ACADEMIC (AB)',
+      cx: 745, cy: 430, w: 185, h: 66,
+      paths: {
+        'GATE-W':  [[650, 435], [460, 425], [195, 405]],
+        'GATE-NE': [[760, 395], [772, 275], [778, 146]],
+      }
+    },
+    {
+      code: 'LB', title: 'LABORATORY (LB)',
+      cx: 415, cy: 525, w: 185, h: 66,
+      paths: {
+        'GATE-W':  [[322, 515], [248, 462], [195, 405]],
+        'GATE-NE': [[508, 510], [645, 345], [778, 146]],
+      }
+    }
+  ];
+
+  let pathsSvg = '';
+  let bldBoxesSvg = '';
+
+  bldConfigs.forEach(b => {
+    const bRoutes = Object.entries(snapshot.routes || {}).filter(([rm]) => rm.startsWith(`${b.code}-`));
+    const safeRoutes = bRoutes.filter(([_, r]) => r.status === 'MODELED_ROUTE_AVAILABLE');
+    const holdRoutes = bRoutes.filter(([_, r]) => r.status === 'HOLD_FOR_AUTHORIZED_GUIDANCE');
+    const critRoutes = bRoutes.filter(([_, r]) => r.status === 'NO_CONFIRMED_ROUTE');
+
+    let bCol = '#059669';
+    let bStatusText = `${bRoutes.length}/${bRoutes.length} CLEAR`;
+    if (isEmergency) {
+      if (critRoutes.length > 0) {
+        bCol = '#dc2626';
+        bStatusText = `${critRoutes.length} THREAT · ${safeRoutes.length} EVAC`;
+      } else if (holdRoutes.length > 0) {
+        bCol = '#d97706';
+        bStatusText = `${holdRoutes.length} HOLD · ${safeRoutes.length} EVAC`;
+      } else {
+        bCol = '#059669';
+        bStatusText = `ALL ${safeRoutes.length} EVACUATING`;
+      }
+    }
+
+    // Draw Evacuation Flow Arrow when Emergency/Warning or Gate Override is active
+    if (isEmergency && safeRoutes.length > 0) {
+      const gateCounts = {};
+      safeRoutes.forEach(([_, r]) => {
+        if (r.gate) gateCounts[r.gate] = (gateCounts[r.gate] || 0) + 1;
+      });
+      const targetGate = Object.entries(gateCounts).sort((a, b) => b[1] - a[1])[0]?.[0];
+      if (targetGate && b.paths[targetGate]) {
+        const dStr = shortenPathEnd(b.paths[targetGate], 30);
+        pathsSvg += `
+          <path d="${dStr}" fill="none" stroke="#047857" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" opacity="0.28"/>
+          <path d="${dStr}" fill="none" stroke="#10b981" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"
+            stroke-dasharray="12,8" marker-end="url(#campus-arr-safe)">
+            <animate attributeName="stroke-dashoffset" from="40" to="0" dur="0.9s" repeatCount="indefinite"/>
+          </path>
+        `;
+      }
+    }
+
+    const bx = b.cx - b.w / 2;
+    const by = b.cy - b.h / 2;
+    bldBoxesSvg += `
+      <g style="cursor:pointer; pointer-events:all;" onclick="switchMapView('${b.code.toLowerCase()}')">
+        <rect x="${bx}" y="${by}" width="${b.w}" height="${b.h}" rx="12"
+          fill="rgba(15, 23, 42, 0.92)" stroke="${bCol}" stroke-width="3"/>
+        <text x="${b.cx}" y="${by + 26}" text-anchor="middle" fill="#ffffff"
+          font-size="13" font-weight="800" font-family="'Inter', sans-serif">${b.title}</text>
+        <rect x="${b.cx - 68}" y="${by + 35}" width="136" height="21" rx="10" fill="${bCol}"/>
+        <text x="${b.cx}" y="${by + 49}" text-anchor="middle" fill="#ffffff"
+          font-size="10.5" font-weight="800" font-family="'JetBrains Mono', monospace">${bStatusText}</text>
       </g>
     `;
   });
 
-  // Dynamic Ground Stair Beacons:
-  const getBeaconHtml = (cx, cy, isSafeAndActive, isThreat) => {
-    const col = isSafeAndActive ? 'var(--c-green)' : isThreat ? 'var(--c-red)' : 'var(--c-amber)';
-    return `
-      <circle cx="${cx}" cy="${cy}" r="7" fill="${col}"/>
-      <circle cx="${cx}" cy="${cy}" r="13" fill="none" stroke="${col}" stroke-width="2" opacity="0.6">
-        <animate attributeName="r" values="7;16;7" dur="2s" repeatCount="indefinite"/>
-        <animate attributeName="opacity" values="0.8;0.1;0.8" dur="2s" repeatCount="indefinite"/>
-      </circle>
+  // Render Gate Markers
+  let gatesSvg = '';
+  for (const [gId, g] of Object.entries(gateCoords)) {
+    const isBlocked = appState.unavailableGates.includes(gId) || blockedSet.has(gId);
+    const gCol = isBlocked ? '#dc2626' : '#059669';
+    const gTag = isBlocked ? `${gId} · BLOCKED` : `${gId} · OPEN`;
+
+    gatesSvg += `
+      <g style="cursor:pointer; pointer-events:all;" onclick="toggleGate('${gId}')">
+        <circle cx="${g.x}" cy="${g.y}" r="28" fill="${gCol}" opacity="0.22"/>
+        <circle cx="${g.x}" cy="${g.y}" r="21" fill="#0f172a" stroke="${gCol}" stroke-width="3.5"/>
+        <text x="${g.x}" y="${g.y + 4}" text-anchor="middle" fill="#ffffff"
+          font-size="10.5" font-weight="800" font-family="'JetBrains Mono', monospace">${gId === 'GATE-W' ? 'W' : 'NE'}</text>
+        <rect x="${g.x - 66}" y="${g.y + 27}" width="132" height="22" rx="11"
+          fill="#0f172a" stroke="${gCol}" stroke-width="2"/>
+        <text x="${g.x}" y="${g.y + 42}" text-anchor="middle" fill="#ffffff"
+          font-size="10.5" font-weight="800" font-family="'JetBrains Mono', monospace">${gTag}</text>
+      </g>
     `;
-  };
+  }
 
-  const beacons = `
-    <!-- Tech Pro Left Stair Base -->
-    ${getBeaconHtml(240, 395, tpbUsesStairL, tpbHasThreat && !tpbUsesStairL)}
-
-    <!-- Tech Pro Right Stair Base -->
-    ${getBeaconHtml(630, 310, tpbUsesStairR, tpbHasThreat && !tpbUsesStairR)}
-
-    <!-- Academic Building Stair Base -->
-    ${getBeaconHtml(640, 480, abCanEvacuate, abHasThreat)}
-
-    <!-- Laboratory Building Stair Base -->
-    ${getBeaconHtml(420, 500, lbCanEvacuate, lbHasThreat)}
-
-    <!-- 6 Ground-Floor Perimeter Devices -->
-    ${outdoorCamBadges}
+  svg.innerHTML = `
+    <defs>
+      <marker id="campus-arr-safe" viewBox="0 0 12 12" markerWidth="7" markerHeight="7" refX="8" refY="6" orient="auto" overflow="visible">
+        <path d="M 0 1 L 10 6 L 0 11 z" fill="#10b981" stroke="#064e3b" stroke-width="0.8"/>
+      </marker>
+    </defs>
+    ${pathsSvg}
+    ${bldBoxesSvg}
+    ${gatesSvg}
   `;
-
-  container.innerHTML = pathsHtml + beacons;
 }
 
-// ── Building Floor Plan Renderer (Architectural Blueprint) ─
-function renderBuildingFloors(bCodeOrNum, snapshot) {
-  if (!bCodeOrNum) return;
-
-  const metaMap = {
-    TPB: { code: 'TPB', name: 'Tech Pro Building', num: 1, floors: 4, roomsPerFloor: 5, img: '/static/b1_floor_plan.jpg', imgH: 502 },
-    AB:  { code: 'AB',  name: 'Academic Building', num: 2, floors: 4, roomsPerFloor: 3, img: '/static/b2_floor_plan.jpg', imgH: 523 },
-    LB:  { code: 'LB',  name: 'Laboratory Building', num: 3, floors: 2, roomsPerFloor: 2, img: '/static/b3_floor_plan.jpg', imgH: 436 },
-    1:   { code: 'TPB', name: 'Tech Pro Building', num: 1, floors: 4, roomsPerFloor: 5, img: '/static/b1_floor_plan.jpg', imgH: 502 },
-    2:   { code: 'AB',  name: 'Academic Building', num: 2, floors: 4, roomsPerFloor: 3, img: '/static/b2_floor_plan.jpg', imgH: 523 },
-    3:   { code: 'LB',  name: 'Laboratory Building', num: 3, floors: 2, roomsPerFloor: 2, img: '/static/b3_floor_plan.jpg', imgH: 436 },
-    b1:  { code: 'TPB', name: 'Tech Pro Building', num: 1, floors: 4, roomsPerFloor: 5, img: '/static/b1_floor_plan.jpg', imgH: 502 },
-    b2:  { code: 'AB',  name: 'Academic Building', num: 2, floors: 4, roomsPerFloor: 3, img: '/static/b2_floor_plan.jpg', imgH: 523 },
-    b3:  { code: 'LB',  name: 'Laboratory Building', num: 3, floors: 2, roomsPerFloor: 2, img: '/static/b3_floor_plan.jpg', imgH: 436 },
+// ── Render Building Floor Blueprints (Sharp Non-Cut Arrows) ──
+function renderBuildingFloors(bKey, snapshot) {
+  const bMap = {
+    tpb: { code: 'TPB', num: 1, name: 'Tech Pro Building', floors: 4, rpf: 5, img: '/static/img/b1_floor.png', imgH: 455 },
+    ab:  { code: 'AB',  num: 2, name: 'Academic Building', floors: 4, rpf: 3, img: '/static/img/b2_floor.png', imgH: 455 },
+    lb:  { code: 'LB',  num: 3, name: 'Laboratory Building', floors: 2, rpf: 2, img: '/static/img/b3_floor.png', imgH: 400 },
   };
-
-  const bMeta = metaMap[bCodeOrNum] || metaMap['TPB'];
-  const { code: bCode, name: bName, num: bNum, floors, roomsPerFloor, img: bImg, imgH } = bMeta;
+  const cfg = bMap[bKey] || bMap.tpb;
+  const { code: bCode, num: bNum, name: bName, floors, rpf: roomsPerFloor, img: bImg, imgH } = cfg;
 
   const roomBoxes = {
     TPB: {
-      1: { x: 148, y: 58, w: 148, h: 242, doorX: 232, doorY: 298, corrY: 360, stairLX: 110, stairRX: 895 },
-      2: { x: 298, y: 58, w: 138, h: 242, doorX: 370, doorY: 298, corrY: 360, stairLX: 110, stairRX: 895 },
-      3: { x: 438, y: 58, w: 138, h: 242, doorX: 495, doorY: 298, corrY: 360, stairLX: 110, stairRX: 895 },
-      4: { x: 578, y: 58, w: 132, h: 242, doorX: 618, doorY: 298, corrY: 360, stairLX: 110, stairRX: 895 },
-      5: { x: 712, y: 58, w: 146, h: 242, doorX: 762, doorY: 298, corrY: 360, stairLX: 110, stairRX: 895 },
+      1: { x: 148, y: 58, w: 148, h: 242, dlX: 185, drX: 262, doorY: 298, corrY: 356, stairLX: 128, stairRX: 882 },
+      2: { x: 298, y: 58, w: 138, h: 242, dlX: 332, drX: 402, doorY: 298, corrY: 356, stairLX: 128, stairRX: 882 },
+      3: { x: 438, y: 58, w: 138, h: 242, dlX: 472, drX: 542, doorY: 298, corrY: 356, stairLX: 128, stairRX: 882 },
+      4: { x: 578, y: 58, w: 132, h: 242, dlX: 610, drX: 678, doorY: 298, corrY: 356, stairLX: 128, stairRX: 882 },
+      5: { x: 712, y: 58, w: 146, h: 242, dlX: 748, drX: 822, doorY: 298, corrY: 356, stairLX: 128, stairRX: 882 },
     },
     AB: {
-      1: { x: 150, y: 58, w: 242, h: 242, doorX: 280, doorY: 298, corrY: 365, stairLX: 110, stairRX: 895 },
-      2: { x: 394, y: 58, w: 224, h: 242, doorX: 495, doorY: 298, corrY: 365, stairLX: 110, stairRX: 895 },
-      3: { x: 620, y: 58, w: 240, h: 242, doorX: 720, doorY: 298, corrY: 365, stairLX: 110, stairRX: 895 },
+      1: { x: 150, y: 58, w: 242, h: 242, dlX: 210, drX: 330, doorY: 298, corrY: 360, stairLX: 128, stairRX: 882 },
+      2: { x: 394, y: 58, w: 224, h: 242, dlX: 450, drX: 560, doorY: 298, corrY: 360, stairLX: 128, stairRX: 882 },
+      3: { x: 620, y: 58, w: 240, h: 242, dlX: 680, drX: 795, doorY: 298, corrY: 360, stairLX: 128, stairRX: 882 },
     },
     LB: {
-      1: { x: 165, y: 48, w: 350, h: 212, doorX: 340, doorY: 258, corrY: 315, stairLX: 120, stairRX: 900 },
-      2: { x: 518, y: 48, w: 342, h: 212, doorX: 665, doorY: 258, corrY: 315, stairLX: 120, stairRX: 900 },
+      1: { x: 165, y: 48, w: 350, h: 212, dlX: 250, drX: 425, doorY: 258, corrY: 312, stairLX: 136, stairRX: 886 },
+      2: { x: 518, y: 48, w: 342, h: 212, dlX: 600, drX: 775, doorY: 258, corrY: 312, stairLX: 136, stairRX: 886 },
     }
   };
 
-  document.getElementById('bld-view-title').textContent = `${bName} (${bCode})`;
-  document.getElementById('bld-view-sub').textContent =
-    `Architectural Blueprint · ${floors} Floors · ${floors * roomsPerFloor} Classrooms · Dynamic Egress`;
+  setText('bld-view-title', `${bName} (${bCode})`);
+  setText('bld-view-sub', `${floors} Floors · ${floors * roomsPerFloor} Classrooms`);
 
   const grid = document.getElementById('floor-grid');
   if (!grid) return;
 
   let anyBlocked = false;
   let anyCritical = false;
-
   const selectedRoomId = document.getElementById('sb-room-select')?.value || '';
+  const isEmergency = snapshot?.global_status === 'CRITICAL' || snapshot?.global_status === 'WARNING';
 
   grid.innerHTML = '';
   for (let f = 1; f <= floors; f++) {
     const pCode = `${bCode}-F${f}`;
-    const pCodeAlt = `B${bNum}-F${f}`;
     const imgW = 1024;
 
-    const badgeW = 140;
-    const badgeH = 36;
+    const badgeW = 136;
+    const badgeH = 32;
     const camLeftX = 148;
-    const camLeftY = imgH - badgeH - 12;
+    const camLeftY = imgH - badgeH - 10;
     const camRightX = 1024 - 148 - badgeW;
-    const camRightY = imgH - badgeH - 12;
+    const camRightY = imgH - badgeH - 10;
 
     const didLeft  = `${pCode}-CAM-L`;
     const didRight = `${pCode}-CAM-R`;
 
-    const detLeft  = appState.detections.find(d => d.device_id === didLeft || d.device_id === `${pCodeAlt}-CAM-L`);
-    const detRight = appState.detections.find(d => d.device_id === didRight || d.device_id === `${pCodeAlt}-CAM-R`);
+    const detLeft  = appState.detections.find(d => d.device_id === didLeft);
+    const detRight = appState.detections.find(d => d.device_id === didRight);
 
-    const colLeft = detLeft?.classification?.level === 'CRITICAL' ? 'var(--c-red)' : detLeft?.classification?.level === 'WARNING' ? 'var(--c-amber)' : 'var(--c-green)';
-    const colRight = detRight?.classification?.level === 'CRITICAL' ? 'var(--c-red)' : detRight?.classification?.level === 'WARNING' ? 'var(--c-amber)' : 'var(--c-green)';
+    const colLeft = detLeft?.classification?.level === 'CRITICAL' ? '#dc2626' : detLeft?.classification?.level === 'WARNING' ? '#d97706' : '#10b981';
+    const colRight = detRight?.classification?.level === 'CRITICAL' ? '#dc2626' : detRight?.classification?.level === 'WARNING' ? '#d97706' : '#10b981';
 
     let roomOverlays = '';
     let arrows = '';
     let floorSafe = true;
     let floorCritical = false;
 
-    const isEmergency = snapshot?.global_status === 'CRITICAL' || snapshot?.global_status === 'WARNING';
-
-    // Render each classroom on this floor
     for (let r = 1; r <= roomsPerFloor; r++) {
       const rmId = `${pCode}-R${r}`;
-      const rm = snapshot?.routes?.[rmId] || snapshot?.routes?.[`${pCodeAlt}-R${r}`];
+      const rm = snapshot?.routes?.[rmId];
       const box = roomBoxes[bCode]?.[r];
       if (!box) continue;
 
       const rmStatus = rm?.status || 'MODELED_ROUTE_AVAILABLE';
+      const isSelected = rmId === selectedRoomId;
 
-      if (isEmergency) {
+      if (isEmergency || isSelected) {
         let fillCol, strokeCol, tagText, tagCol;
         if (rmStatus === 'MODELED_ROUTE_AVAILABLE') {
-          fillCol = 'rgba(5, 150, 105, 0.22)';
-          strokeCol = 'rgba(5, 150, 105, 0.75)';
+          fillCol = isSelected ? 'rgba(5, 150, 105, 0.34)' : 'rgba(5, 150, 105, 0.20)';
+          strokeCol = '#10b981';
           tagText = `R${r} · SAFE`;
           tagCol = '#86efac';
         } else if (rmStatus === 'HOLD_FOR_AUTHORIZED_GUIDANCE') {
           floorSafe = false;
-          fillCol = 'rgba(217, 119, 6, 0.32)';
-          strokeCol = 'rgba(217, 119, 6, 0.88)';
-          tagText = `R${r} · ON HOLD`;
+          fillCol = 'rgba(217, 119, 6, 0.30)';
+          strokeCol = '#f59e0b';
+          tagText = `R${r} · HOLD`;
           tagCol = '#fde68a';
         } else {
           floorSafe = false;
           floorCritical = true;
-          fillCol = 'rgba(220, 38, 38, 0.38)';
-          strokeCol = 'rgba(220, 38, 38, 0.95)';
+          fillCol = 'rgba(220, 38, 38, 0.36)';
+          strokeCol = '#ef4444';
           tagText = `R${r} · THREAT`;
           tagCol = '#fca5a5';
         }
 
         roomOverlays += `
           <g id="box-${rmId}">
-            <rect x="${box.x}" y="${box.y}" width="${box.w}" height="${box.h}" rx="4"
-              fill="${fillCol}" stroke="${strokeCol}" stroke-width="2"/>
-            <!-- Room Status Tag -->
-            <rect x="${box.x + 8}" y="${box.y + 8}" width="68" height="20" rx="4" fill="#0f172a" opacity="0.92"/>
-            <text x="${box.x + 42}" y="${box.y + 22}" text-anchor="middle" fill="${tagCol}" font-size="10" font-weight="700" font-family="'JetBrains Mono', monospace">${tagText}</text>
+            <rect x="${box.x}" y="${box.y}" width="${box.w}" height="${box.h}" rx="5"
+              fill="${fillCol}" stroke="${strokeCol}" stroke-width="${isSelected ? 3.5 : 2}"/>
+            <rect x="${box.x + 8}" y="${box.y + 8}" width="72" height="20" rx="4" fill="#0f172a" opacity="0.92"/>
+            <text x="${box.x + 44}" y="${box.y + 22}" text-anchor="middle" fill="${tagCol}"
+              font-size="10" font-weight="800" font-family="'JetBrains Mono', monospace">${tagText}</text>
           </g>
         `;
 
         if (rmStatus === 'MODELED_ROUTE_AVAILABLE') {
-          const useLeft = rm?.route?.some(n => n.includes('STAIR-L')) || r <= roomsPerFloor / 2;
-          const targetX = useLeft ? Math.max(box.stairLX, 125) : Math.min(box.stairRX, 880);
+          // Determine actual stairwell from route nodes (fixes fallback direction bug)
+          const useLeft = rm?.route?.some(n => n.includes('STAIR-L'))
+            ? true
+            : rm?.route?.some(n => n.includes('STAIR-R'))
+              ? false
+              : (r <= roomsPerFloor / 2);
+
+          const targetX = useLeft ? box.stairLX : box.stairRX;
+          const doorX = rm?.door?.endsWith('-DL') ? box.dlX : rm?.door?.endsWith('-DR') ? box.drX : (useLeft ? box.dlX : box.drX);
           const startX = box.x + (box.w / 2);
-          const startY = box.y + (box.h * 0.45);
+          const startY = box.y + (box.h * 0.52);
+          // Slight corridor lane offset so arrows from adjacent rooms never collide or clip
+          const laneOffset = Math.round((r - (roomsPerFloor + 1) / 2) * 3.5);
+          const laneY = box.corrY + laneOffset;
 
           arrows += `
-            <path d="M ${startX} ${startY} L ${box.doorX} ${box.doorY} L ${box.doorX} ${box.corrY} L ${targetX} ${box.corrY}"
-              fill="none" stroke="var(--c-green)" stroke-width="4.5"
-              stroke-dasharray="10,6" filter="url(#glow-g)" marker-end="url(#arr-f-${bCode}-${f})">
+            <path d="M ${startX} ${startY} L ${doorX} ${box.doorY} L ${doorX} ${laneY} L ${targetX} ${laneY}"
+              fill="none" stroke="#064e3b" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.45"/>
+            <path d="M ${startX} ${startY} L ${doorX} ${box.doorY} L ${doorX} ${laneY} L ${targetX} ${laneY}"
+              fill="none" stroke="#10b981" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"
+              stroke-dasharray="10,6" marker-end="url(#arr-f-${bCode}-${f})">
               <animate attributeName="stroke-dashoffset" from="32" to="0" dur="0.85s" repeatCount="indefinite"/>
-            </path>`;
+            </path>
+          `;
         }
       } else {
         roomOverlays += `
           <g id="box-${rmId}">
             <rect x="${box.x}" y="${box.y}" width="${box.w}" height="${box.h}" rx="4"
               fill="rgba(255, 255, 255, 0.03)" stroke="rgba(148, 163, 184, 0.25)" stroke-width="1"/>
-            <rect x="${box.x + 8}" y="${box.y + 8}" width="54" height="18" rx="3" fill="#0f172a" opacity="0.75"/>
-            <text x="${box.x + 35}" y="${box.y + 21}" text-anchor="middle" fill="#94a3b8" font-size="10" font-weight="600" font-family="'JetBrains Mono', monospace">R${r}</text>
+            <rect x="${box.x + 8}" y="${box.y + 8}" width="46" height="18" rx="4" fill="#0f172a" opacity="0.8"/>
+            <text x="${box.x + 31}" y="${box.y + 21}" text-anchor="middle" fill="#cbd5e1"
+              font-size="10" font-weight="700" font-family="'JetBrains Mono', monospace">R${r}</text>
           </g>
         `;
       }
@@ -875,8 +730,7 @@ function renderBuildingFloors(bCodeOrNum, snapshot) {
     if (!floorSafe) anyBlocked = true;
 
     const badgeClass = floorCritical ? 'critical' : !floorSafe ? 'warning' : 'safe';
-    const badgeText  = !isEmergency ? 'Normal Baseline' : floorCritical ? 'Threat Area' : !floorSafe ? 'Caution / Hold' : 'Evacuate';
-    const beaconType = floorCritical ? 'critical' : !floorSafe ? 'warning' : 'normal';
+    const badgeText  = !isEmergency ? 'Clear' : floorCritical ? 'Threat' : !floorSafe ? 'Hold' : 'Evacuating';
 
     const card = document.createElement('div');
     card.className = 'floor-card';
@@ -887,37 +741,29 @@ function renderBuildingFloors(bCodeOrNum, snapshot) {
           <span class="floor-card-code"> &middot; ${pCode}</span>
         </div>
         <span class="badge ${badgeClass}">
-          <span class="status-beacon ${beaconType}" style="width:6px; height:6px;"></span>
+          <span class="status-beacon ${badgeClass === 'safe' ? '' : badgeClass}" style="width:6px; height:6px;"></span>
           ${badgeText}
         </span>
       </div>
-      <div class="floor-card-img-wrap" style="position:relative;">
-        <img src="${bImg}" alt="Floor ${f} Blueprint" style="width:100%; display:block;" />
-        <svg viewBox="0 0 ${imgW} ${imgH}" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;" xmlns="http://www.w3.org/2000/svg">
+      <div class="floor-card-img-wrap">
+        <img src="${bImg}" alt="Floor ${f} Blueprint" />
+        <svg viewBox="0 0 ${imgW} ${imgH}" overflow="visible" xmlns="http://www.w3.org/2000/svg">
           <defs>
-            <marker id="arr-f-${bCode}-${f}" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
-              <polygon points="0 0, 9 4.5, 0 9" fill="var(--c-green)"/>
+            <marker id="arr-f-${bCode}-${f}" viewBox="0 0 12 12" markerWidth="6.5" markerHeight="6.5" refX="8" refY="6" orient="auto" overflow="visible">
+              <path d="M 0 1 L 10 6 L 0 11 z" fill="#10b981" stroke="#064e3b" stroke-width="0.8"/>
             </marker>
           </defs>
-
-          <!-- Translucent Room Overlays (Green=Safe, Yellow=Hold, Red=Threat) -->
           ${roomOverlays}
-
-          <!-- Evacuation Directional Arrow Lines (Thick, All Rooms) -->
           ${arrows}
-
-          <!-- Bottom Left Camera Device -->
           <g>
-            <rect x="${camLeftX}" y="${camLeftY}" width="${badgeW}" height="${badgeH}" rx="6" fill="#0f172a" stroke="#334155" stroke-width="2"/>
-            <circle cx="${camLeftX + 16}" cy="${camLeftY + (badgeH / 2)}" r="5.5" fill="${colLeft}"/>
-            <text x="${camLeftX + 28}" y="${camLeftY + (badgeH / 2) + 4}" fill="#ffffff" font-size="11" font-weight="700" font-family="'JetBrains Mono', monospace">${didLeft}</text>
+            <rect x="${camLeftX}" y="${camLeftY}" width="${badgeW}" height="${badgeH}" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
+            <circle cx="${camLeftX + 14}" cy="${camLeftY + badgeH / 2}" r="5" fill="${colLeft}"/>
+            <text x="${camLeftX + 25}" y="${camLeftY + badgeH / 2 + 4}" fill="#ffffff" font-size="10.5" font-weight="700" font-family="'JetBrains Mono', monospace">${didLeft}</text>
           </g>
-
-          <!-- Bottom Right Camera Device -->
           <g>
-            <rect x="${camRightX}" y="${camRightY}" width="${badgeW}" height="${badgeH}" rx="6" fill="#0f172a" stroke="#334155" stroke-width="2"/>
-            <circle cx="${camRightX + 16}" cy="${camRightY + (badgeH / 2)}" r="5.5" fill="${colRight}"/>
-            <text x="${camRightX + 28}" y="${camRightY + (badgeH / 2) + 4}" fill="#ffffff" font-size="11" font-weight="700" font-family="'JetBrains Mono', monospace">${didRight}</text>
+            <rect x="${camRightX}" y="${camRightY}" width="${badgeW}" height="${badgeH}" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
+            <circle cx="${camRightX + 14}" cy="${camRightY + badgeH / 2}" r="5" fill="${colRight}"/>
+            <text x="${camRightX + 25}" y="${camRightY + badgeH / 2 + 4}" fill="#ffffff" font-size="10.5" font-weight="700" font-family="'JetBrains Mono', monospace">${didRight}</text>
           </g>
         </svg>
       </div>
@@ -927,123 +773,112 @@ function renderBuildingFloors(bCodeOrNum, snapshot) {
 
   const bldBadge = document.getElementById('bld-view-badge');
   const bType = anyCritical ? 'critical' : anyBlocked ? 'warning' : 'safe';
-  bldBadge.className = `badge ${bType}`;
-  const isCampusEmergency = snapshot?.global_status === 'CRITICAL' || snapshot?.global_status === 'WARNING';
-  bldBadge.innerHTML = `<span class="status-beacon ${bType}" style="width:7px; height:7px;"></span> ${!isCampusEmergency ? 'Normal Baseline' : anyCritical ? 'Threat Area' : anyBlocked ? 'Caution / On Hold' : 'Safe Evacuation'}`;
+  if (bldBadge) {
+    bldBadge.className = `badge ${bType}`;
+    bldBadge.innerHTML = `<span class="status-beacon ${bType === 'safe' ? '' : bType}" style="width:6px; height:6px;"></span> ${!isEmergency ? 'Normal' : anyCritical ? 'Threat Area' : anyBlocked ? 'Hold / Caution' : 'Evacuating'}`;
+  }
 }
 
-// ── Building Status Dots in Map Subnav ──────────────────────
+// ── Building Status Badges in Pills & Summary Cards ────────
 function updateBuildingBadges(snapshot) {
   const isEmergency = snapshot?.global_status === 'CRITICAL' || snapshot?.global_status === 'WARNING';
   const bMap = [
-    { code: 'TPB', num: 1, dotId: 'dot-tpb', fallbackDot: 'dot-b1', badgeId: 'tpb-badge', fallbackBadge: 'b1-badge' },
-    { code: 'AB',  num: 2, dotId: 'dot-ab',  fallbackDot: 'dot-b2', badgeId: 'ab-badge',  fallbackBadge: 'b2-badge' },
-    { code: 'LB',  num: 3, dotId: 'dot-lb',  fallbackDot: 'dot-b3', badgeId: 'lb-badge',  fallbackBadge: 'b3-badge' },
+    { code: 'TPB', dotId: 'dot-tpb', badgeId: 'tpb-badge' },
+    { code: 'AB',  dotId: 'dot-ab',  badgeId: 'ab-badge' },
+    { code: 'LB',  dotId: 'dot-lb',  badgeId: 'lb-badge' },
   ];
 
-  bMap.forEach(({ code, num, dotId, fallbackDot, badgeId, fallbackBadge }) => {
-    const dot = document.getElementById(dotId) || document.getElementById(fallbackDot);
-    const badgeEl = document.getElementById(badgeId) || document.getElementById(fallbackBadge);
-    if (!dot) return;
+  bMap.forEach(({ code, dotId, badgeId }) => {
+    const dot = document.getElementById(dotId);
+    const badgeEl = document.getElementById(badgeId);
 
     const hasCritical = Object.entries(snapshot?.routes || {}).some(
-      ([rm, r]) => (rm.startsWith(`${code}-`) || rm.startsWith(`B${num}-`)) && r.status === 'NO_CONFIRMED_ROUTE'
+      ([rm, r]) => rm.startsWith(`${code}-`) && r.status === 'NO_CONFIRMED_ROUTE'
     );
     const hasWarning = Object.entries(snapshot?.routes || {}).some(
-      ([rm, r]) => (rm.startsWith(`${code}-`) || rm.startsWith(`B${num}-`)) && r.status === 'HOLD_FOR_AUTHORIZED_GUIDANCE'
+      ([rm, r]) => rm.startsWith(`${code}-`) && r.status === 'HOLD_FOR_AUTHORIZED_GUIDANCE'
     );
 
-    let stat, label;
-    if (!isEmergency) {
-      stat = 'safe';
-      label = 'Normal Baseline';
-    } else if (hasCritical) {
-      stat = 'critical';
-      label = 'Threat Area';
-    } else if (hasWarning) {
-      stat = 'warning';
-      label = 'Shelter in Place';
-    } else {
-      stat = 'safe';
-      label = 'Evacuation Active';
+    let stat = 'safe';
+    let label = 'All Clear';
+    if (isEmergency) {
+      if (hasCritical) { stat = 'critical'; label = 'Threat Area'; }
+      else if (hasWarning) { stat = 'warning'; label = 'Hold in Place'; }
+      else { stat = 'safe'; label = 'Evacuating'; }
     }
 
-    dot.className = `status-beacon ${stat === 'safe' ? 'normal' : stat}`;
-
+    if (dot) dot.className = `status-beacon ${stat === 'safe' ? '' : stat}`;
     if (badgeEl) {
-      badgeEl.innerHTML = `<span class="badge ${stat}"><span class="status-beacon ${stat === 'safe' ? 'normal' : stat}" style="width:6px; height:6px;"></span> ${label}</span>`;
+      badgeEl.innerHTML = `<span class="badge ${stat}"><span class="status-beacon ${stat === 'safe' ? '' : stat}" style="width:6px;height:6px;"></span>${label}</span>`;
     }
   });
 }
 
-// ── Executive Metrics (Clean 4-Card Grid) ──────────────────
+// ── KPI Metrics ────────────────────────────────────────────
 function updateMetrics(snap) {
   const counts = snap.counts || {};
-  setText('m-safe',      counts['MODELED_ROUTE_AVAILABLE'] ?? '36');
-  setText('m-hold',      counts['HOLD_FOR_AUTHORIZED_GUIDANCE'] ?? '0');
-  setText('m-blocked',   counts['NO_CONFIRMED_ROUTE'] ?? '0');
+  setText('m-safe',    counts['MODELED_ROUTE_AVAILABLE'] ?? '36');
+  setText('m-hold',    counts['HOLD_FOR_AUTHORIZED_GUIDANCE'] ?? '0');
+  setText('m-blocked', counts['NO_CONFIRMED_ROUTE'] ?? '0');
 }
 
-// ── Classroom Master Table (Green=Safe, Yellow=Hold, Red=Threat) ──
+// ── Classroom Table & Event Log ────────────────────────────
 function updateRoomsTable(snap) {
   const tbody = document.getElementById('rooms-table-body');
   if (!tbody) return;
 
   const routes = snap.routes || {};
-  const rows = Object.entries(routes).map(([rm, r]) => {
+  tbody.innerHTML = Object.entries(routes).map(([rm, r]) => {
     const isSafe = r.status === 'MODELED_ROUTE_AVAILABLE';
     const isHold = r.status === 'HOLD_FOR_AUTHORIZED_GUIDANCE';
     const rowClass = isSafe ? 'row-safe' : isHold ? 'row-hold' : 'row-threat';
     const statusClass = isSafe ? 'safe' : isHold ? 'warning' : 'critical';
-    const statusLabel = isSafe ? 'Safe Evacuation'
-      : isHold ? 'On Hold (Threat Below/Hazard)'
-      : 'Threat Area / Blocked';
-    const beaconType = isSafe ? 'normal' : isHold ? 'warning' : 'critical';
+    const statusLabel = isSafe ? 'Safe Egress' : isHold ? 'Hold in Place' : 'Threat / Blocked';
 
     return `<tr class="${rowClass}">
       <td><span class="room-code">${rm}</span></td>
-      <td><span class="badge ${statusClass}"><span class="status-beacon ${beaconType}" style="width:6px; height:6px;"></span> ${statusLabel}</span></td>
+      <td><span class="badge ${statusClass}"><span class="status-beacon ${statusClass === 'safe' ? '' : statusClass}" style="width:6px;height:6px;"></span>${statusLabel}</span></td>
       <td><span class="gate-code">${r.gate || '—'}</span></td>
       <td>${r.door_label || '—'}</td>
-      <td>${r.route?.length ? r.route.length + ' steps' : 'No Exit'}</td>
+      <td>${r.route?.length ? r.route.length + ' nodes' : 'Blocked'}</td>
     </tr>`;
-  });
-
-  tbody.innerHTML = rows.join('') || '<tr><td colspan="5" style="text-align:center; color:var(--c-muted); padding:20px;">No active data.</td></tr>';
+  }).join('');
 
   const badge = document.getElementById('table-status-badge');
-  const lvl = snap.global_status?.toLowerCase() || 'normal';
-  badge.className = `badge ${lvl === 'normal' ? 'safe' : lvl === 'warning' ? 'warning' : 'critical'}`;
-  badge.innerHTML = `<span class="status-beacon ${lvl === 'normal' ? 'normal' : lvl}" style="width:6px; height:6px;"></span> ${lvl.toUpperCase()}`;
+  const lvl = (snap.global_status || 'NORMAL').toLowerCase();
+  if (badge) {
+    badge.className = `badge ${lvl === 'normal' ? 'safe' : lvl}`;
+    badge.textContent = lvl.toUpperCase();
+  }
 }
 
-// ── Incident Event Log ─────────────────────────────────────
 function updateEventLog(snap) {
   const el = document.getElementById('event-log');
   if (!el) return;
   const events = snap.events || [];
   if (!events.length) {
-    el.innerHTML = '<div class="empty-state"><p>No active incidents recorded. Perimeter secure.</p></div>';
+    el.innerHTML = '<div class="empty-state">No active incidents recorded. Campus secure.</div>';
     return;
   }
   el.innerHTML = `<div class="event-list">${events.map(ev => {
-    const lvl = ev.level.toLowerCase();
+    const lvl = (ev.level || 'NORMAL').toLowerCase();
+    const loc = Array.isArray(ev.location) ? ev.location.join(', ') : (ev.location || '');
     return `
-    <div class="event-item ${lvl}">
-      <span class="status-beacon ${lvl === 'normal' ? 'normal' : lvl}" style="width:8px; height:8px; margin-top:4px;"></span>
-      <div class="event-text">
-        <b>${ev.device_id}</b> &middot; <span style="font-weight:700;">${ev.level}</span><br>
-        <span style="color:var(--c-muted);">Event ID: <code>${ev.event_id}</code></span>
-        ${ev.location ? `<br><span style="color:var(--c-muted);">Reported Area: ${ev.location}</span>` : ''}
+      <div class="event-item ${lvl}">
+        <span class="status-beacon ${lvl === 'normal' ? '' : lvl}" style="margin-top:4px;"></span>
+        <div>
+          <div style="font-weight:800; color:var(--c-navy);">${ev.device_id} &middot; ${ev.level}</div>
+          <div style="color:var(--c-muted); font-size:11px;">Event <code>${ev.event_id}</code> ${loc ? `&middot; Zone: ${loc}` : ''}</div>
+        </div>
       </div>
-    </div>`;
+    `;
   }).join('')}</div>`;
 }
 
-// ── CCTV Grid with Realistic Simulated CRT Standby Screen ──
+// ── CCTV Matrix Grid ───────────────────────────────────────
 function filterCams(group) {
   appState.camFilter = group;
-  document.querySelectorAll('.cam-filter-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('#tab-cctv .filter-pill').forEach(b => b.classList.remove('active'));
   document.getElementById(`camf-${group}`)?.classList.add('active');
   renderCamGrid();
 }
@@ -1053,38 +888,29 @@ function renderCamGrid() {
   if (!grid) return;
 
   const filter = appState.camFilter;
-  const allDevices = appState.devices;
+  const allDevices = appState.devices || {};
   const detections = appState.detections || [];
 
   const outdoorDescriptions = {
-    'TPB-OUT-L': 'Ground Exterior — Tech Pro West Approach (near Gate-W)',
-    'TPB-OUT-R': 'Ground Exterior — Tech Pro East Approach (near Gate-NE)',
-    'AB-OUT-L':  'Ground Exterior — Academic North Courtyard',
-    'AB-OUT-R':  'Ground Exterior — Academic South / East Alley',
-    'LB-OUT-L':  'Ground Exterior — Laboratory West Gate Approach',
-    'LB-OUT-R':  'Ground Exterior — Laboratory Courtyard Approach',
-    'B1-OUT-L':  'Ground Exterior — Tech Pro West Approach (near Gate-W)',
-    'B1-OUT-R':  'Ground Exterior — Tech Pro East Approach (near Gate-NE)',
-    'B2-OUT-L':  'Ground Exterior — Academic North Courtyard',
-    'B2-OUT-R':  'Ground Exterior — Academic South / East Alley',
-    'B3-OUT-L':  'Ground Exterior — Laboratory West Gate Approach',
-    'B3-OUT-R':  'Ground Exterior — Laboratory Courtyard Approach',
+    'TPB-CAM-OUT-L': 'Perimeter — Tech Pro West Approach (GATE-W)',
+    'TPB-CAM-OUT-R': 'Perimeter — Tech Pro East Approach (GATE-NE)',
+    'AB-CAM-OUT-L':  'Perimeter — Academic North Courtyard',
+    'AB-CAM-OUT-R':  'Perimeter — Academic East Alley',
+    'LB-CAM-OUT-L':  'Perimeter — Laboratory West Gate Path',
+    'LB-CAM-OUT-R':  'Perimeter — Laboratory Courtyard Path',
   };
 
   const filtered = Object.values(allDevices).filter(d => {
-    const isOutdoor = d.kind === 'outdoor';
-    const tpb = (d.device_id.startsWith('TPB') || d.device_id.startsWith('B1')) && !isOutdoor;
-    const ab  = (d.device_id.startsWith('AB')  || d.device_id.startsWith('B2')) && !isOutdoor;
-    const lb  = (d.device_id.startsWith('LB')  || d.device_id.startsWith('B3')) && !isOutdoor;
+    const isOutdoor = d.kind === 'outdoor' || d.device_id.includes('OUT');
     if (filter === 'outside') return isOutdoor;
-    if (filter === 'tpb' || filter === 'b1') return tpb;
-    if (filter === 'ab'  || filter === 'b2') return ab;
-    if (filter === 'lb'  || filter === 'b3') return lb;
+    if (filter === 'tpb') return d.device_id.startsWith('TPB-') && !isOutdoor;
+    if (filter === 'ab')  return d.device_id.startsWith('AB-')  && !isOutdoor;
+    if (filter === 'lb')  return d.device_id.startsWith('LB-')  && !isOutdoor;
     return false;
   });
 
   if (!filtered.length) {
-    grid.innerHTML = '<div class="empty-state"><p>No devices mapped to this group.</p></div>';
+    grid.innerHTML = '<div class="empty-state">No cameras in this group.</div>';
     return;
   }
 
@@ -1096,68 +922,204 @@ function renderCamGrid() {
     const scores = latest?.scores || {};
     const lvl = clf.level || 'NORMAL';
     const badgeClass = lvl === 'CRITICAL' ? 'critical' : lvl === 'WARNING' ? 'warning' : 'safe';
-    const beaconType = lvl === 'CRITICAL' ? 'critical' : lvl === 'WARNING' ? 'warning' : 'normal';
 
     const coverage = outdoorDescriptions[d.device_id]
-      || (d.covered_rooms?.length ? `Classrooms: ${d.covered_rooms.join(', ')}` : (d.covered_node || 'Ground Approach'));
+      || (d.covered_rooms?.length ? `Rooms: ${d.covered_rooms.join(', ')}` : (d.covered_node || 'Campus Approach'));
 
-    // Video Section: IF video uploaded, show video + scores; ELSE show realistic CCTV standby monitor!
-    const videoSection = hasAlert ? `
+    const bodyHtml = hasAlert ? `
       <div class="cam-video-row">
-        <div>
-          <video src="${latest.video_url || '/videos-project/test_video.mp4'}" controls autoplay muted playsinline loop
-            style="width:100%; border-radius:6px; border:1px solid var(--c-border); display:block;"
-            onloadedmetadata="this.currentTime=0;">
-          </video>
-        </div>
+        <video src="${latest.video_url || '/videos-project/test_video.mp4'}" controls autoplay muted playsinline loop
+          style="width:100%; height:156px; object-fit:cover; border-radius:8px; background:#000; display:block;">
+        </video>
         <div class="cam-scores">
-          <div style="font-size:11px; font-weight:700; color:var(--c-navy); margin-bottom:8px;">Live AI Scoreboard</div>
+          <div style="font-size:10.5px; font-weight:800; color:var(--c-navy); margin-bottom:4px; text-transform:uppercase;">3-Criteria AI Telemetry</div>
           <div class="cam-score-row"><span>Threat Index</span><span class="cam-score-val threat">${clf.index?.toFixed(1) ?? '—'} / 100</span></div>
-          <div class="cam-score-row"><span>Object (YOLO)</span><span class="cam-score-val">${scores.object ?? clf.object ?? '—'}</span></div>
-          <div class="cam-score-row"><span>Pose Keypoints</span><span class="cam-score-val">${scores.pose ?? clf.pose ?? '—'}</span></div>
-          <div class="cam-score-row"><span>Acoustic RMS</span><span class="cam-score-val">${scores.acoustic ?? clf.acoustic ?? '—'}</span></div>
-          <div class="cam-score-row"><span>Safety Status</span><span class="cam-score-val ${clf.verified ? 'threat' : ''}">${clf.verified ? 'CONFIRMED' : 'Under Review'}</span></div>
+          <div class="cam-score-row"><span>1. Object (&ge;60%)</span><span class="cam-score-val">${scores.object ?? clf.object ?? '—'}%</span></div>
+          <div class="cam-score-row"><span>2. Pose Keypoints</span><span class="cam-score-val">${scores.pose ?? clf.pose ?? '—'}%</span></div>
+          <div class="cam-score-row"><span>3. Acoustic RMS</span><span class="cam-score-val">${scores.acoustic ?? clf.acoustic ?? '—'}%</span></div>
+          <div class="cam-score-row"><span>Gatekeeper</span><span class="cam-score-val ${clf.verified ? 'threat' : ''}">${clf.verified ? 'VERIFIED' : 'UNVERIFIED'}</span></div>
         </div>
-      </div>` : `
+      </div>
+    ` : `
       <div class="cctv-screen">
         <div class="cctv-osd-top">
           <span>${d.device_id}</span>
-          <div class="cctv-osd-rec">
-            <span class="cctv-rec-dot"></span>
-            <span>STANDBY</span>
-          </div>
+          <span class="cctv-osd-rec"><span class="cctv-rec-dot"></span>STANDBY</span>
         </div>
         <div class="cctv-center-notice">
-          <svg class="icon icon-md" viewBox="0 0 24 24" style="color:#64748b; margin-bottom:4px;">
-            <path d="M15 10l4.553-2.07A1 1 0 0121 8.86v6.28a1 1 0 01-1.447.93L15 14M4 8h11a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1V9a1 1 0 011-1z"/>
-          </svg>
-          <div class="cctv-center-status">SIMULATION FEED · NO SIGNAL</div>
-          <div class="cctv-center-sub">Standby mode &middot; Ready for upload or simulation</div>
+          <div class="cctv-center-status">ONLINE &middot; NO ACTIVE THREAT</div>
+          <div class="cctv-center-sub">Ready for 3-Criteria Video Scan</div>
         </div>
         <div class="cctv-osd-bottom">
-          <span>FPS: 30</span>
-          <span>AUTO-INGEST READY</span>
+          <span>YOLOv8n + Pose + RMS</span>
+          <span>30 FPS</span>
         </div>
-      </div>`;
+      </div>
+    `;
 
     return `
-    <div class="cam-card ${hasAlert ? 'alert' : ''}">
-      <div class="cam-card-header">
-        <span class="cam-id">${d.device_id}</span>
-        <span class="badge ${badgeClass}">
-          <span class="status-beacon ${beaconType}" style="width:6px; height:6px;"></span>
-          ${lvl}
-        </span>
+      <div class="cam-card ${hasAlert ? 'alert' : ''}">
+        <div class="cam-card-header">
+          <span class="cam-id">${d.device_id}</span>
+          <span class="badge ${badgeClass}">
+            <span class="status-beacon ${badgeClass === 'safe' ? '' : badgeClass}" style="width:6px;height:6px;"></span>
+            ${lvl}
+          </span>
+        </div>
+        <div class="cam-body">
+          <div class="cam-coverage">${coverage}</div>
+          ${bodyHtml}
+        </div>
       </div>
-      <div class="cam-body">
-        <div class="cam-coverage">Zone: <b>${coverage}</b></div>
-        ${videoSection}
-      </div>
-    </div>`;
+    `;
   }).join('');
 }
 
-// ── Video Threat Simulation & Upload Handlers ──────────────
+// ── Fast 3-Criteria Video Scanner Modal ────────────────────
+function resetCriteriaCards() {
+  const defs = [
+    { idx: 1, rule: 'YOLO >= 60%' },
+    { idx: 2, rule: '>=2 Sigs >= 50%' },
+    { idx: 3, rule: 'Index >= 70.0' },
+  ];
+  defs.forEach(({ idx, rule }) => {
+    const card = document.getElementById(`crit-card-${idx}`);
+    const badge = document.getElementById(`crit-badge-${idx}`);
+    const val = document.getElementById(`crit-val-${idx}`);
+    if (card) card.className = 'crit-pill-card';
+    if (badge) badge.textContent = 'REQ';
+    if (val) val.textContent = rule;
+  });
+  const resBox = document.getElementById('modal-scan-result');
+  if (resBox) {
+    resBox.style.display = 'none';
+    resBox.className = 'scan-result-box';
+  }
+}
+
+function openUploadModal() {
+  const modal = document.getElementById('upload-modal');
+  const sel = document.getElementById('modal-upload-device');
+  const fileInput = document.getElementById('modal-video-file');
+  const progress = document.getElementById('modal-upload-progress');
+  const submitBtn = document.getElementById('modal-upload-submit');
+
+  if (fileInput) fileInput.value = '';
+  if (progress) progress.style.display = 'none';
+  if (submitBtn) submitBtn.disabled = false;
+  resetCriteriaCards();
+
+  if (modal && sel) {
+    populateDeviceDropdown(sel);
+    modal.style.display = 'flex';
+  }
+}
+
+function closeUploadModal() {
+  const modal = document.getElementById('upload-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+function populateDeviceDropdown(selectEl) {
+  const groups = {};
+  CANONICAL_DEVICES.forEach(d => {
+    if (!groups[d.grp]) groups[d.grp] = [];
+    groups[d.grp].push(d);
+  });
+  selectEl.innerHTML = Object.entries(groups)
+    .map(([grp, list]) => `<optgroup label="${grp}">${list.map(item => `<option value="${item.id}">${item.label}</option>`).join('')}</optgroup>`)
+    .join('');
+}
+
+async function submitModalVideoUpload() {
+  const fileInput = document.getElementById('modal-video-file');
+  const devSelect = document.getElementById('modal-upload-device');
+  const progress = document.getElementById('modal-upload-progress');
+  const statusTxt = document.getElementById('modal-upload-status');
+  const submitBtn = document.getElementById('modal-upload-submit');
+  const resBox = document.getElementById('modal-scan-result');
+
+  if (!fileInput || !fileInput.files.length) {
+    toast('Select a video file first', 'warning');
+    return;
+  }
+  const file = fileInput.files[0];
+  const targetDev = devSelect ? devSelect.value : 'TPB-CAM-OUT-L';
+
+  resetCriteriaCards();
+  if (progress) progress.style.display = 'block';
+  if (statusTxt) statusTxt.textContent = `Fast-scanning ${file.name} on ${targetDev} (8-keyframe early-exit)…`;
+  if (submitBtn) submitBtn.disabled = true;
+
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('device_ids', targetDev);
+
+  try {
+    const res = await fetch(API + '/api/upload-video', {
+      method: 'POST',
+      body: formData,
+    });
+    const data = await res.json();
+
+    if (res.ok) {
+      const c1Pass = (data.object_score ?? 0) >= 60;
+      const c2Pass = (data.supporting_signals ?? 0) >= 2;
+      const c3Pass = (data.threat_index ?? 0) >= 70;
+
+      // Update Criterion 1 Card
+      const c1Card = document.getElementById('crit-card-1');
+      if (c1Card) c1Card.className = `crit-pill-card ${c1Pass ? 'pass' : 'fail'}`;
+      setText('crit-badge-1', c1Pass ? 'PASS' : 'FAIL');
+      setText('crit-val-1', `Object: ${Number(data.object_score || 0).toFixed(1)}%`);
+
+      // Update Criterion 2 Card
+      const c2Card = document.getElementById('crit-card-2');
+      if (c2Card) c2Card.className = `crit-pill-card ${c2Pass ? 'pass' : 'fail'}`;
+      setText('crit-badge-2', c2Pass ? 'PASS' : 'FAIL');
+      setText('crit-val-2', `${data.supporting_signals ?? 0}/3 Signals >= 50%`);
+
+      // Update Criterion 3 Card
+      const c3Card = document.getElementById('crit-card-3');
+      if (c3Card) c3Card.className = `crit-pill-card ${c3Pass ? 'pass' : 'fail'}`;
+      setText('crit-badge-3', c3Pass ? 'PASS' : 'FAIL');
+      setText('crit-val-3', `Index: ${Number(data.threat_index || 0).toFixed(1)} / 100`);
+
+      if (resBox) {
+        resBox.style.display = 'block';
+        resBox.className = `scan-result-box ${data.criteria_passed ? 'critical' : 'safe'}`;
+        resBox.innerHTML = `
+          <div style="font-weight:800; margin-bottom:2px;">
+            ${data.criteria_passed ? `THREAT VERIFIED (${data.level})` : `ALL CLEAR — CRITERIA NOT MET (${data.level})`}
+            &middot; <span style="font-family:'JetBrains Mono',monospace;">${Number(data.scan_ms || 0).toFixed(0)}ms</span>
+            ${data.early_exit ? ' &middot; Early-Exit' : ''}
+          </div>
+          <div style="font-size:11px;">
+            Object ${Number(data.object_score || 0).toFixed(0)}% &middot; Pose ${Number(data.pose_score || 0).toFixed(0)}% &middot; Acoustic ${Number(data.acoustic_score || 0).toFixed(0)}%
+            (${data.frames_analyzed || 0} keyframes)
+          </div>
+        `;
+      }
+
+      await refresh();
+      toast(
+        data.criteria_passed
+          ? `THREAT VERIFIED on ${targetDev} in ${Number(data.scan_ms || 0).toFixed(0)}ms! Evacuation routes active.`
+          : `Scanned ${targetDev} in ${Number(data.scan_ms || 0).toFixed(0)}ms — Criteria not met.`,
+        data.criteria_passed ? 'critical' : 'success'
+      );
+    } else {
+      toast(`Scan error: ${data.detail || 'Inference failed'}`, 'error');
+    }
+  } catch (err) {
+    toast(`Upload failed: ${err.message}`, 'error');
+  } finally {
+    if (progress) progress.style.display = 'none';
+    if (submitBtn) submitBtn.disabled = false;
+  }
+}
+
+// ── Quick Simulator Modal ──────────────────────────────────
 function openSimModal() {
   const modal = document.getElementById('sim-modal');
   const sel = document.getElementById('sim-target-cam');
@@ -1177,17 +1139,16 @@ async function submitSimThreat() {
   const level = document.getElementById('sim-threat-level')?.value || 'CRITICAL';
   if (!targetCam) return;
 
-  const scores = level === 'CRITICAL' ? { acoustic: 88, pose: 80, object: 92 }
-    : level === 'WARNING' ? { acoustic: 55, pose: 45, object: 40 }
-    : { acoustic: 12, pose: 10, object: 5 };
+  const scores = level === 'CRITICAL'
+    ? { acoustic: 88, pose: 80, object: 92 }
+    : { acoustic: 55, pose: 45, object: 40 };
 
-  toast(`Simulating video feed on ${targetCam}…`, 'info');
   const res = await apiFetch('/api/simulate-threat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       device_ids: [targetCam],
-      level: level,
+      level,
       acoustic: scores.acoustic,
       pose: scores.pose,
       object: scores.object,
@@ -1196,217 +1157,20 @@ async function submitSimThreat() {
 
   if (res?.ok) {
     closeSimModal();
-    toast(`Injected simulated threat feed on ${targetCam}`, 'success');
+    toast(`Simulated ${level} feed on ${targetCam}`, 'critical');
     await refresh();
-  } else {
-    toast('Simulation failed to trigger', 'error');
-  }
-}
-
-async function handleVideoUpload(file) {
-  if (!file) return;
-  toast(`Uploading ${file.name} for AI analysis…`, 'info');
-
-  const formData = new FormData();
-  formData.append('file', file);
-  const target = appState.camFilter === 'b2' ? 'B2-F1-CAM-L' : appState.camFilter === 'b3' ? 'B3-F1-CAM-L' : 'B1-F1-CAM-L';
-  formData.append('device_ids', target);
-
-  try {
-    const res = await fetch(API + '/api/upload-video', {
-      method: 'POST',
-      body: formData,
-    });
-    const data = await res.json();
-    if (res.ok) {
-      toast(`Video ingested on ${target}! YOLOv8 threat registered.`, 'success');
-      await refresh();
-    } else {
-      toast(`Upload error: ${data.detail || 'Failed to process'}`, 'error');
-    }
-  } catch (e) {
-    toast(`Video upload failed: ${e.message}`, 'error');
   }
 }
 
 async function clearDetections() {
-  toast('Clearing active detection records…', 'info');
   const res = await apiFetch('/api/detections/clear', { method: 'POST' });
   if (res?.ok) {
-    toast('All cameras returned to Standby No-Signal', 'success');
+    toast('All camera detections cleared', 'success');
     await refresh();
   }
 }
 
-// ── Utility Helpers ────────────────────────────────────────
 function setText(id, val) {
   const el = document.getElementById(id);
   if (el) el.textContent = val;
-}
-
-function formatRoomLabel(id) {
-  const m = id.match(/^B(\d+)-F(\d+)-R(\d+)$/);
-  if (!m) return id;
-  return `Building ${m[1]} &middot; Floor ${m[2]} &middot; Room ${m[3]}`;
-}
-
-
-// ── Video Upload & Ingestion Modal Handlers ──────────────────
-function openUploadModal() {
-  const modal = document.getElementById('upload-modal');
-  const sel = document.getElementById('modal-upload-device');
-  const fileInput = document.getElementById('modal-video-file');
-  const progress = document.getElementById('modal-upload-progress');
-  const submitBtn = document.getElementById('modal-upload-submit');
-
-  if (fileInput) fileInput.value = '';
-  if (progress) progress.style.display = 'none';
-  if (submitBtn) submitBtn.disabled = false;
-
-  if (modal && sel) {
-    populateDeviceDropdown(sel);
-    modal.style.display = 'flex';
-  }
-}
-
-function closeUploadModal() {
-  const modal = document.getElementById('upload-modal');
-  if (modal) modal.style.display = 'none';
-}
-
-const CANONICAL_DEVICES = [
-  { id: 'TPB-CAM-OUT-L', grp: 'Campus Perimeter & Gates', label: 'TPB-CAM-OUT-L — Tech Pro West Approach (Gate-W / West Gate)' },
-  { id: 'TPB-CAM-OUT-R', grp: 'Campus Perimeter & Gates', label: 'TPB-CAM-OUT-R — Tech Pro East Approach (Gate-NE / Northeast Gate)' },
-  { id: 'AB-CAM-OUT-L',  grp: 'Campus Perimeter & Gates', label: 'AB-CAM-OUT-L — Academic North Courtyard' },
-  { id: 'AB-CAM-OUT-R',  grp: 'Campus Perimeter & Gates', label: 'AB-CAM-OUT-R — Academic South / East Alley' },
-  { id: 'LB-CAM-OUT-L',  grp: 'Campus Perimeter & Gates', label: 'LB-CAM-OUT-L — Laboratory West Gate Approach' },
-  { id: 'LB-CAM-OUT-R',  grp: 'Campus Perimeter & Gates', label: 'LB-CAM-OUT-R — Laboratory Courtyard Approach' },
-  { id: 'TPB-F1-CAM-L', grp: 'Tech Pro Building (TPB)', label: 'TPB-F1-CAM-L (Floor 1 Left — Rooms R1, R2, R3)' },
-  { id: 'TPB-F1-CAM-R', grp: 'Tech Pro Building (TPB)', label: 'TPB-F1-CAM-R (Floor 1 Right — Rooms R3, R4, R5)' },
-  { id: 'TPB-F2-CAM-L', grp: 'Tech Pro Building (TPB)', label: 'TPB-F2-CAM-L (Floor 2 Left — Rooms R1, R2, R3)' },
-  { id: 'TPB-F2-CAM-R', grp: 'Tech Pro Building (TPB)', label: 'TPB-F2-CAM-R (Floor 2 Right — Rooms R3, R4, R5)' },
-  { id: 'TPB-F3-CAM-L', grp: 'Tech Pro Building (TPB)', label: 'TPB-F3-CAM-L (Floor 3 Left — Rooms R1, R2, R3)' },
-  { id: 'TPB-F3-CAM-R', grp: 'Tech Pro Building (TPB)', label: 'TPB-F3-CAM-R (Floor 3 Right — Rooms R3, R4, R5)' },
-  { id: 'TPB-F4-CAM-L', grp: 'Tech Pro Building (TPB)', label: 'TPB-F4-CAM-L (Floor 4 Left — Rooms R1, R2, R3)' },
-  { id: 'TPB-F4-CAM-R', grp: 'Tech Pro Building (TPB)', label: 'TPB-F4-CAM-R (Floor 4 Right — Rooms R3, R4, R5)' },
-  { id: 'AB-F1-CAM-L', grp: 'Academic Building (AB)', label: 'AB-F1-CAM-L (Floor 1 Left — Rooms R1, R2)' },
-  { id: 'AB-F1-CAM-R', grp: 'Academic Building (AB)', label: 'AB-F1-CAM-R (Floor 1 Right — Rooms R2, R3)' },
-  { id: 'AB-F2-CAM-L', grp: 'Academic Building (AB)', label: 'AB-F2-CAM-L (Floor 2 Left — Rooms R1, R2)' },
-  { id: 'AB-F2-CAM-R', grp: 'Academic Building (AB)', label: 'AB-F2-CAM-R (Floor 2 Right — Rooms R2, R3)' },
-  { id: 'AB-F3-CAM-L', grp: 'Academic Building (AB)', label: 'AB-F3-CAM-L (Floor 3 Left — Rooms R1, R2)' },
-  { id: 'AB-F3-CAM-R', grp: 'Academic Building (AB)', label: 'AB-F3-CAM-R (Floor 3 Right — Rooms R2, R3)' },
-  { id: 'AB-F4-CAM-L', grp: 'Academic Building (AB)', label: 'AB-F4-CAM-L (Floor 4 Left — Rooms R1, R2)' },
-  { id: 'AB-F4-CAM-R', grp: 'Academic Building (AB)', label: 'AB-F4-CAM-R (Floor 4 Right — Rooms R2, R3)' },
-  { id: 'LB-F1-CAM-L', grp: 'Laboratory Building (LB)', label: 'LB-F1-CAM-L (Floor 1 Left — Room R1)' },
-  { id: 'LB-F1-CAM-R', grp: 'Laboratory Building (LB)', label: 'LB-F1-CAM-R (Floor 1 Right — Room R2)' },
-  { id: 'LB-F2-CAM-L', grp: 'Laboratory Building (LB)', label: 'LB-F2-CAM-L (Floor 2 Left — Room R1)' },
-  { id: 'LB-F2-CAM-R', grp: 'Laboratory Building (LB)', label: 'LB-F2-CAM-R (Floor 2 Right — Room R2)' },
-];
-
-function populateDeviceDropdown(selectEl) {
-  const devs = appState.devices || {};
-  if (Object.keys(devs).length === 0) {
-    // Immediate fallback when appState.devices is still loading
-    const groups = {};
-    CANONICAL_DEVICES.forEach(d => {
-      if (!groups[d.grp]) groups[d.grp] = [];
-      groups[d.grp].push(d);
-    });
-    selectEl.innerHTML = Object.entries(groups)
-      .map(([grp, list]) => `<optgroup label="${grp}">${list.map(item => `<option value="${item.id}">${item.label}</option>`).join('')}</optgroup>`)
-      .join('');
-    return;
-  }
-
-  const outdoorDescs = {
-    'TPB-CAM-OUT-L': 'Perimeter — Tech Pro West Approach (Gate-W / West Gate)',
-    'TPB-CAM-OUT-R': 'Perimeter — Tech Pro East Approach (Gate-NE / Northeast Gate)',
-    'AB-CAM-OUT-L':  'Perimeter — Academic North Courtyard',
-    'AB-CAM-OUT-R':  'Perimeter — Academic South / East Alley',
-    'LB-CAM-OUT-L':  'Perimeter — Laboratory West Gate Approach',
-    'LB-CAM-OUT-R':  'Perimeter — Laboratory Courtyard Approach',
-    'TPB-OUT-L': 'Perimeter — Tech Pro West Approach (Gate-W / West Gate)',
-    'TPB-OUT-R': 'Perimeter — Tech Pro East Approach (Gate-NE / Northeast Gate)',
-    'AB-OUT-L':  'Perimeter — Academic North Courtyard',
-    'AB-OUT-R':  'Perimeter — Academic South / East Alley',
-    'LB-OUT-L':  'Perimeter — Laboratory West Gate Approach',
-    'LB-OUT-R':  'Perimeter — Laboratory Courtyard Approach',
-  };
-
-  const groups = {
-    'Campus Perimeter & Gates': [],
-    'Tech Pro Building (TPB)': [],
-    'Academic Building (AB)': [],
-    'Laboratory Building (LB)': [],
-  };
-
-  Object.values(devs).forEach(d => {
-    const id = d.device_id;
-    if (d.kind === 'outdoor' || id.includes('OUT')) {
-      const desc = outdoorDescs[id] || `${id} (Ground Exterior)`;
-      groups['Campus Perimeter & Gates'].push({ id, label: desc });
-    } else if (id.startsWith('TPB') || id.startsWith('B1')) {
-      const cov = d.covered_rooms?.length ? `Rooms ${d.covered_rooms.join(', ')}` : `Floor ${d.floor}`;
-      groups['Tech Pro Building (TPB)'].push({ id, label: `${id} (Floor ${d.floor} ${d.side === 'L' ? 'Left' : 'Right'} — ${cov})` });
-    } else if (id.startsWith('AB') || id.startsWith('B2')) {
-      const cov = d.covered_rooms?.length ? `Rooms ${d.covered_rooms.join(', ')}` : `Floor ${d.floor}`;
-      groups['Academic Building (AB)'].push({ id, label: `${id} (Floor ${d.floor} ${d.side === 'L' ? 'Left' : 'Right'} — ${cov})` });
-    } else if (id.startsWith('LB') || id.startsWith('B3')) {
-      const cov = d.covered_rooms?.length ? `Rooms ${d.covered_rooms.join(', ')}` : `Floor ${d.floor}`;
-      groups['Laboratory Building (LB)'].push({ id, label: `${id} (Floor ${d.floor} ${d.side === 'L' ? 'Left' : 'Right'} — ${cov})` });
-    }
-  });
-
-  selectEl.innerHTML = Object.entries(groups)
-    .filter(([_, list]) => list.length > 0)
-    .map(([grp, list]) => `<optgroup label="${grp}">${list.map(item => `<option value="${item.id}">${item.label}</option>`).join('')}</optgroup>`)
-    .join('');
-}
-
-async function submitModalVideoUpload() {
-  const fileInput = document.getElementById('modal-video-file');
-  const devSelect = document.getElementById('modal-upload-device');
-  const progress = document.getElementById('modal-upload-progress');
-  const statusTxt = document.getElementById('modal-upload-status');
-  const submitBtn = document.getElementById('modal-upload-submit');
-
-  if (!fileInput || !fileInput.files.length) {
-    toast('Please select a video file first.', 'warning');
-    return;
-  }
-  const file = fileInput.files[0];
-  const targetDev = devSelect ? devSelect.value : 'TPB-CAM-OUT-L';
-
-  if (progress) progress.style.display = 'block';
-  if (statusTxt) statusTxt.textContent = `Analyzing ${file.name} with YOLOv8 & audio extraction on ${targetDev}...`;
-  if (submitBtn) submitBtn.disabled = true;
-
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('device_ids', targetDev);
-
-  try {
-    const res = await fetch(API + '/api/upload-video', {
-      method: 'POST',
-      body: formData,
-    });
-    const data = await res.json();
-
-    if (res.ok) {
-      closeUploadModal();
-      if (data.criteria_passed) {
-        toast(`THREAT VERIFIED on ${targetDev} (${data.level} · Index ${data.threat_index.toFixed(1)}/100). Evacuation simulation initiated!`, 'critical');
-      } else {
-        toast(`Video ingested on ${targetDev}. Threat criteria NOT met (${data.level} · Index ${data.threat_index.toFixed(1)}/100). Campus remains ALL CLEAR.`, 'info');
-      }
-      await refresh();
-    } else {
-      toast(`Upload error: ${data.detail || 'Inference failed'}`, 'error');
-    }
-  } catch (err) {
-    toast(`Video upload failed: ${err.message}`, 'error');
-  } finally {
-    if (progress) progress.style.display = 'none';
-    if (submitBtn) submitBtn.disabled = false;
-  }
 }

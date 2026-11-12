@@ -3,10 +3,11 @@ SENTINEL FastAPI Backend
 Official Title: Microcontroller-Based Acoustic-Visual Threat Detection and
 Evacuation Simulation for Sto. Niño Senior High School, Tacloban City
 
-Run with:  uvicorn api:app --reload --port 8000
+Run with:  python -m uvicorn api:app --reload --port 8000
 """
 import json
 import os
+import re
 import threading
 import uuid
 from datetime import datetime
@@ -23,6 +24,7 @@ from dynamic_evacuation import (
     ROOMS, DEVICES, COVERAGE, GATES, BUILDINGS, BUILDING_NAMES,
     Observation, assess, route, all_routes, route_summary_counts,
     classify_threat, calculate_threat_index,
+    SUPPORT_THRESHOLD, OBJECT_VERIFY_THRESHOLD, CRITICAL_INDEX,
 )
 from demo_detector import prebaked_scenarios
 import database
@@ -38,7 +40,7 @@ database.init_db()
 
 app = FastAPI(
     title="SENTINEL — Campus Safety Command API",
-    version="2.0.0",
+    version="2.1.0",
     description="Acoustic-Visual Threat Detection and Evacuation Simulation",
 )
 
@@ -93,10 +95,17 @@ def _get_snapshot():
     return snap, obs
 
 
-def _global_status(observations):
-    if any(o.level == "CRITICAL" for o in observations):
+def _global_status(observations, snap=None):
+    """Determine global campus status accounting for AI observations, gate closures, and manual blocks."""
+    blocked_nodes = set(snap["blocked"]) if snap else set(_state["unavailable_gates"]) | set(_state["manual_blocks"])
+    if any(o.level == "CRITICAL" for o in observations) or set(GATES).issubset(blocked_nodes):
         return "CRITICAL"
-    if any(o.level == "WARNING" for o in observations) or _state["unavailable_gates"]:
+    if (
+        any(o.level == "WARNING" for o in observations)
+        or _state["unavailable_gates"]
+        or _state["manual_blocks"]
+        or _state["closed_edges"]
+    ):
         return "WARNING"
     return "NORMAL"
 
@@ -140,17 +149,23 @@ async def root():
 async def get_status():
     """Global campus health: threat level, gate states, active scenario."""
     snap, obs = _get_snapshot()
-    status = _global_status(obs)
+    status = _global_status(obs, snap)
+    blocked_set = set(snap["blocked"])
 
     gate_states = {}
     for g in GATES:
-        gate_states[g] = "BLOCKED" if g in _state["unavailable_gates"] else "OPEN"
+        gate_states[g] = "BLOCKED" if (g in _state["unavailable_gates"] or g in blocked_set) else "OPEN"
+
+    try:
+        database.update_gate_statuses(gate_states)
+    except Exception:
+        pass
 
     return {
         "status": status,
         "status_label": {
             "NORMAL": "ALL CLEAR — Campus Secure",
-            "WARNING": "ELEVATED RISK — Caution",
+            "WARNING": "ELEVATED RISK — Caution Active",
             "CRITICAL": "EMERGENCY — Evacuate Now",
         }[status],
         "active_scenario": _state["scenario"],
@@ -169,7 +184,7 @@ async def get_status():
 async def get_snapshot():
     """Full routing snapshot for all 36 rooms."""
     snap, obs = _get_snapshot()
-    status = _global_status(obs)
+    status = _global_status(obs, snap)
     counts = route_summary_counts(snap)
 
     routes_out = {}
@@ -328,13 +343,21 @@ async def set_gates(req: GateRequest):
     if invalid:
         raise HTTPException(status_code=400, detail=f"Unknown gates: {invalid}")
     _state["unavailable_gates"] = req.unavailable_gates
+    try:
+        database.log_audit("SET_GATES", "OPERATOR", {"unavailable_gates": req.unavailable_gates})
+    except Exception:
+        pass
     return {"ok": True, "unavailable_gates": _state["unavailable_gates"]}
 
 
 @app.post("/api/blocks")
 async def set_blocks(req: BlockRequest):
-    """Manually block nodes (stairwells, corridors)."""
+    """Manually block nodes (stairwells, corridors, classrooms)."""
     _state["manual_blocks"] = req.manual_blocks
+    try:
+        database.log_audit("SET_BLOCKS", "OPERATOR", {"manual_blocks": req.manual_blocks})
+    except Exception:
+        pass
     return {"ok": True, "manual_blocks": _state["manual_blocks"]}
 
 
@@ -346,6 +369,11 @@ async def reset_state():
     _state["closed_edges"] = []
     _state["unavailable_gates"] = []
     clear_detections()
+    try:
+        database.update_gate_statuses({g: "OPEN" for g in GATES})
+        database.log_audit("RESET_STATE", "OPERATOR", {"status": "ALL_CLEAR"})
+    except Exception:
+        pass
     return {"ok": True, "message": "Campus state reset to normal."}
 
 
@@ -355,7 +383,7 @@ async def simulate_threat(req: ThreatSimRequest):
     current_records = load_detections()
     incident_id = req.incident_id or f"inc-{uuid.uuid4().hex[:6]}"
     clf = classify_threat(req.acoustic, req.pose, req.object)
-    
+
     for did in req.device_ids:
         if did not in DEVICES:
             continue
@@ -372,9 +400,13 @@ async def simulate_threat(req: ThreatSimRequest):
             "classification": clf,
         }
         current_records.append(rec)
-        
+
     save_detections(current_records)
     _state["scenario"] = "all_clear"
+    try:
+        database.log_audit("SIMULATE_THREAT", "OPERATOR", {"devices": req.device_ids, "classification": clf})
+    except Exception:
+        pass
     return {"ok": True, "count": len(req.device_ids), "classification": clf}
 
 
@@ -383,44 +415,58 @@ async def upload_video(
     file: UploadFile = File(...),
     device_ids: str = Form("TPB-F1-CAM-L"),
 ):
-    """Upload a video file, run YOLOv8 & acoustic threat analysis, update detections.json."""
+    """Upload a video file, run fast 3-Criteria YOLOv8 & acoustic threat analysis, update detections.json."""
     dev_list = [d.strip() for d in device_ids.split(",") if d.strip() in DEVICES]
     if not dev_list:
         raise HTTPException(status_code=400, detail="No valid device_ids provided.")
-    
+
+    safe_name = re.sub(r"[^a-zA-Z0-9._-]", "_", file.filename or "upload.mp4")
     VIDEOS_DIR.mkdir(exist_ok=True)
-    save_path = VIDEOS_DIR / f"upload_{uuid.uuid4().hex[:6]}_{file.filename}"
+    save_path = VIDEOS_DIR / f"upload_{uuid.uuid4().hex[:6]}_{safe_name}"
     contents = await file.read()
     with open(save_path, "wb") as f:
         f.write(contents)
-        
+
     incident_id = f"inc-{uuid.uuid4().hex[:6]}"
     current_records = load_detections()
-    
+
     try:
         base_rec = analyze_video_feed(
             str(save_path),
             device_id=dev_list[0],
             incident_id=incident_id,
-            sample_frames=20,
+            sample_frames=8,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Inference error: {str(e)}")
-        
+
     for did in dev_list:
         c_rec = dict(base_rec)
         c_rec["device_id"] = did
         c_rec["event_id"] = f"ai-{uuid.uuid4().hex[:6]}"
         c_rec["video_url"] = f"/videos-project/{save_path.name}"
         current_records.append(c_rec)
-        
+
     save_detections(current_records)
     _state["scenario"] = "all_clear"
-    
+
     clf = base_rec.get("classification", {})
     level = clf.get("level", "NORMAL")
     passed = level in ("CRITICAL", "WARNING")
-    
+    breakdown = base_rec.get("criteria_breakdown", {})
+    scan_ms = breakdown.get("scan_ms", 0.0)
+
+    try:
+        database.log_audit("UPLOAD_VIDEO", "OPERATOR", {
+            "devices": dev_list,
+            "file": safe_name,
+            "level": level,
+            "threat_index": clf.get("index", 0.0),
+            "scan_ms": scan_ms,
+        })
+    except Exception:
+        pass
+
     return {
         "ok": True,
         "devices": dev_list,
@@ -431,13 +477,18 @@ async def upload_video(
         "object_score": base_rec.get("scores", {}).get("object", 0.0),
         "pose_score": base_rec.get("scores", {}).get("pose", 0.0),
         "acoustic_score": base_rec.get("scores", {}).get("acoustic", 0.0),
+        "supporting_signals": clf.get("supporting_signals", 0),
         "verified": clf.get("verified", False),
         "criteria_passed": passed,
+        "criteria_breakdown": breakdown,
+        "scan_ms": scan_ms,
+        "frames_analyzed": base_rec.get("object_stats", {}).get("frames_analyzed", 0),
+        "early_exit": base_rec.get("object_stats", {}).get("early_exit", False),
         "video_url": f"/videos-project/{save_path.name}",
         "message": (
-            f"THREAT VERIFIED: {level} (Threat Index: {clf.get('index', 0):.1f}/100). Evacuation simulation initiated!"
+            f"THREAT VERIFIED: {level} (Index {clf.get('index', 0):.1f}/100 · {scan_ms:.0f}ms). Evacuation simulation active!"
             if passed
-            else f"Criteria Not Met: Classified as {level} (Threat Index: {clf.get('index', 0):.1f}/100). No evacuation needed."
+            else f"Criteria Not Met: {level} (Index {clf.get('index', 0):.1f}/100 · {scan_ms:.0f}ms). Campus remains ALL CLEAR."
         )
     }
 
