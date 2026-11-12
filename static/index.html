@@ -470,11 +470,10 @@
             <svg class="icon icon-sm" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
             Simulate Video Threat
           </button>
-          <label class="map-btn" style="font-size:11px; padding:6px 12px; cursor:pointer;">
+          <button class="map-btn" onclick="openUploadModal()" style="font-size:11px; padding:6px 12px; cursor:pointer;">
             <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
             Upload Video
-            <input type="file" id="cctv-file-upload" accept="video/*" style="display:none;" onchange="handleVideoUpload(this.files[0])">
-          </label>
+          </button>
           <button class="map-btn" onclick="clearDetections()" style="font-size:11px; padding:6px 12px; color:var(--c-red); border-color:var(--c-red-border);">
             <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
             Clear Detections
@@ -509,6 +508,62 @@
 
   </div><!-- #content -->
 </main>
+
+<!-- Upload Video & Ingest Camera Feed Modal -->
+<div id="upload-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.65); z-index:9999; align-items:center; justify-content:center;">
+  <div style="background:var(--c-surface); width:490px; max-width:92%; border-radius:var(--radius-lg); padding:24px; box-shadow:var(--shadow-lg); border:1px solid var(--c-border);">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <svg class="icon icon-md" viewBox="0 0 24 24" style="color:var(--c-blue);"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+        <h3 style="font-size:15px; font-weight:800; color:var(--c-navy); margin:0;">Upload Video &amp; Assign Camera</h3>
+      </div>
+      <button onclick="closeUploadModal()" style="background:none; border:none; font-size:22px; cursor:pointer; color:var(--c-muted); line-height:1;">&times;</button>
+    </div>
+
+    <!-- Step 1: Video File Selection -->
+    <div style="margin-bottom:14px;">
+      <label style="display:block; font-size:11px; font-weight:700; color:var(--c-muted); margin-bottom:6px; text-transform:uppercase;">1. Select Video File (Any Video Format):</label>
+      <input type="file" id="modal-video-file" accept="video/*" style="width:100%; font-size:12px; padding:8px; border:1px solid var(--c-border); border-radius:6px; background:#ffffff; color:var(--c-text); box-sizing:border-box;">
+      <div style="font-size:11px; color:var(--c-muted); margin-top:4px;">Supports all video formats for AI threat scanning (MP4 and WebM recommended for live CCTV playback).</div>
+    </div>
+
+    <!-- Step 2: Target Camera Selection -->
+    <div style="margin-bottom:16px;">
+      <label style="display:block; font-size:11px; font-weight:700; color:var(--c-muted); margin-bottom:6px; text-transform:uppercase;">2. Device Recording This Video:</label>
+      <select class="sb-select" id="modal-upload-device" style="background:#ffffff; color:var(--c-text); border-color:var(--c-border); width:100%;">
+        <!-- Populated via JavaScript dynamically -->
+      </select>
+      <div style="font-size:11px; color:var(--c-muted); margin-top:5px;">
+        If threat criteria pass, the system will mark this camera's zone as threatened and simulate dynamic evacuation routing.
+      </div>
+    </div>
+
+    <!-- 3-Criteria Notice -->
+    <div style="background:#f8fafc; border:1px solid var(--c-border); border-radius:6px; padding:10px 12px; margin-bottom:16px; font-size:11px; color:var(--c-muted); line-height:1.45;">
+      <strong style="color:var(--c-navy);">Threat Criteria Verification:</strong><br>
+      Evacuation simulation is conducted <em>IF AND ONLY IF</em> the uploaded video surpasses the criteria:
+      <div style="margin-top:4px; display:flex; flex-direction:column; gap:2px;">
+        <span>&bull; <strong>Visual Weapon:</strong> YOLOv8 object score &ge; 60%</span>
+        <span>&bull; <strong>Multi-Signal:</strong> At least 2 signals (Object, Pose, Acoustic) &ge; 50%</span>
+        <span>&bull; <strong>Composite Index:</strong> T = 0.40(O) + 0.35(P) + 0.25(A) &ge; 70.0</span>
+      </div>
+    </div>
+
+    <!-- Progress Indicator -->
+    <div id="modal-upload-progress" style="display:none; margin-bottom:16px; padding:12px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <svg class="icon icon-sm spin" viewBox="0 0 24 24" style="color:var(--c-blue);"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/></svg>
+        <span style="font-size:12px; font-weight:700; color:var(--c-blue);" id="modal-upload-status">Scanning video frames with YOLOv8 &amp; analyzing audio...</span>
+      </div>
+    </div>
+
+    <!-- Modal Actions -->
+    <div style="display:flex; justify-content:flex-end; gap:8px;">
+      <button class="map-btn" onclick="closeUploadModal()" id="modal-upload-cancel">Cancel</button>
+      <button class="pill-btn active" style="font-size:12px; padding:8px 18px;" id="modal-upload-submit" onclick="submitModalVideoUpload()">Scan &amp; Ingest Feed</button>
+    </div>
+  </div>
+</div>
 
 <!-- Simulation Feed Modal -->
 <div id="sim-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.6); z-index:9999; align-items:center; justify-content:center;">

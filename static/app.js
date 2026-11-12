@@ -1162,8 +1162,7 @@ function openSimModal() {
   const modal = document.getElementById('sim-modal');
   const sel = document.getElementById('sim-target-cam');
   if (modal && sel) {
-    const devs = Object.keys(appState.devices).sort();
-    sel.innerHTML = devs.map(d => `<option value="${d}">${d}</option>`).join('');
+    populateDeviceDropdown(sel);
     modal.style.display = 'flex';
   }
 }
@@ -1249,4 +1248,165 @@ function formatRoomLabel(id) {
   const m = id.match(/^B(\d+)-F(\d+)-R(\d+)$/);
   if (!m) return id;
   return `Building ${m[1]} &middot; Floor ${m[2]} &middot; Room ${m[3]}`;
+}
+
+
+// ── Video Upload & Ingestion Modal Handlers ──────────────────
+function openUploadModal() {
+  const modal = document.getElementById('upload-modal');
+  const sel = document.getElementById('modal-upload-device');
+  const fileInput = document.getElementById('modal-video-file');
+  const progress = document.getElementById('modal-upload-progress');
+  const submitBtn = document.getElementById('modal-upload-submit');
+
+  if (fileInput) fileInput.value = '';
+  if (progress) progress.style.display = 'none';
+  if (submitBtn) submitBtn.disabled = false;
+
+  if (modal && sel) {
+    populateDeviceDropdown(sel);
+    modal.style.display = 'flex';
+  }
+}
+
+function closeUploadModal() {
+  const modal = document.getElementById('upload-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+const CANONICAL_DEVICES = [
+  { id: 'TPB-CAM-OUT-L', grp: 'Campus Perimeter & Gates', label: 'TPB-CAM-OUT-L — Tech Pro West Approach (Gate-W / West Gate)' },
+  { id: 'TPB-CAM-OUT-R', grp: 'Campus Perimeter & Gates', label: 'TPB-CAM-OUT-R — Tech Pro East Approach (Gate-NE / Northeast Gate)' },
+  { id: 'AB-CAM-OUT-L',  grp: 'Campus Perimeter & Gates', label: 'AB-CAM-OUT-L — Academic North Courtyard' },
+  { id: 'AB-CAM-OUT-R',  grp: 'Campus Perimeter & Gates', label: 'AB-CAM-OUT-R — Academic South / East Alley' },
+  { id: 'LB-CAM-OUT-L',  grp: 'Campus Perimeter & Gates', label: 'LB-CAM-OUT-L — Laboratory West Gate Approach' },
+  { id: 'LB-CAM-OUT-R',  grp: 'Campus Perimeter & Gates', label: 'LB-CAM-OUT-R — Laboratory Courtyard Approach' },
+  { id: 'TPB-F1-CAM-L', grp: 'Tech Pro Building (TPB)', label: 'TPB-F1-CAM-L (Floor 1 Left — Rooms R1, R2, R3)' },
+  { id: 'TPB-F1-CAM-R', grp: 'Tech Pro Building (TPB)', label: 'TPB-F1-CAM-R (Floor 1 Right — Rooms R3, R4, R5)' },
+  { id: 'TPB-F2-CAM-L', grp: 'Tech Pro Building (TPB)', label: 'TPB-F2-CAM-L (Floor 2 Left — Rooms R1, R2, R3)' },
+  { id: 'TPB-F2-CAM-R', grp: 'Tech Pro Building (TPB)', label: 'TPB-F2-CAM-R (Floor 2 Right — Rooms R3, R4, R5)' },
+  { id: 'TPB-F3-CAM-L', grp: 'Tech Pro Building (TPB)', label: 'TPB-F3-CAM-L (Floor 3 Left — Rooms R1, R2, R3)' },
+  { id: 'TPB-F3-CAM-R', grp: 'Tech Pro Building (TPB)', label: 'TPB-F3-CAM-R (Floor 3 Right — Rooms R3, R4, R5)' },
+  { id: 'TPB-F4-CAM-L', grp: 'Tech Pro Building (TPB)', label: 'TPB-F4-CAM-L (Floor 4 Left — Rooms R1, R2, R3)' },
+  { id: 'TPB-F4-CAM-R', grp: 'Tech Pro Building (TPB)', label: 'TPB-F4-CAM-R (Floor 4 Right — Rooms R3, R4, R5)' },
+  { id: 'AB-F1-CAM-L', grp: 'Academic Building (AB)', label: 'AB-F1-CAM-L (Floor 1 Left — Rooms R1, R2)' },
+  { id: 'AB-F1-CAM-R', grp: 'Academic Building (AB)', label: 'AB-F1-CAM-R (Floor 1 Right — Rooms R2, R3)' },
+  { id: 'AB-F2-CAM-L', grp: 'Academic Building (AB)', label: 'AB-F2-CAM-L (Floor 2 Left — Rooms R1, R2)' },
+  { id: 'AB-F2-CAM-R', grp: 'Academic Building (AB)', label: 'AB-F2-CAM-R (Floor 2 Right — Rooms R2, R3)' },
+  { id: 'AB-F3-CAM-L', grp: 'Academic Building (AB)', label: 'AB-F3-CAM-L (Floor 3 Left — Rooms R1, R2)' },
+  { id: 'AB-F3-CAM-R', grp: 'Academic Building (AB)', label: 'AB-F3-CAM-R (Floor 3 Right — Rooms R2, R3)' },
+  { id: 'AB-F4-CAM-L', grp: 'Academic Building (AB)', label: 'AB-F4-CAM-L (Floor 4 Left — Rooms R1, R2)' },
+  { id: 'AB-F4-CAM-R', grp: 'Academic Building (AB)', label: 'AB-F4-CAM-R (Floor 4 Right — Rooms R2, R3)' },
+  { id: 'LB-F1-CAM-L', grp: 'Laboratory Building (LB)', label: 'LB-F1-CAM-L (Floor 1 Left — Room R1)' },
+  { id: 'LB-F1-CAM-R', grp: 'Laboratory Building (LB)', label: 'LB-F1-CAM-R (Floor 1 Right — Room R2)' },
+  { id: 'LB-F2-CAM-L', grp: 'Laboratory Building (LB)', label: 'LB-F2-CAM-L (Floor 2 Left — Room R1)' },
+  { id: 'LB-F2-CAM-R', grp: 'Laboratory Building (LB)', label: 'LB-F2-CAM-R (Floor 2 Right — Room R2)' },
+];
+
+function populateDeviceDropdown(selectEl) {
+  const devs = appState.devices || {};
+  if (Object.keys(devs).length === 0) {
+    // Immediate fallback when appState.devices is still loading
+    const groups = {};
+    CANONICAL_DEVICES.forEach(d => {
+      if (!groups[d.grp]) groups[d.grp] = [];
+      groups[d.grp].push(d);
+    });
+    selectEl.innerHTML = Object.entries(groups)
+      .map(([grp, list]) => `<optgroup label="${grp}">${list.map(item => `<option value="${item.id}">${item.label}</option>`).join('')}</optgroup>`)
+      .join('');
+    return;
+  }
+
+  const outdoorDescs = {
+    'TPB-CAM-OUT-L': 'Perimeter — Tech Pro West Approach (Gate-W / West Gate)',
+    'TPB-CAM-OUT-R': 'Perimeter — Tech Pro East Approach (Gate-NE / Northeast Gate)',
+    'AB-CAM-OUT-L':  'Perimeter — Academic North Courtyard',
+    'AB-CAM-OUT-R':  'Perimeter — Academic South / East Alley',
+    'LB-CAM-OUT-L':  'Perimeter — Laboratory West Gate Approach',
+    'LB-CAM-OUT-R':  'Perimeter — Laboratory Courtyard Approach',
+    'TPB-OUT-L': 'Perimeter — Tech Pro West Approach (Gate-W / West Gate)',
+    'TPB-OUT-R': 'Perimeter — Tech Pro East Approach (Gate-NE / Northeast Gate)',
+    'AB-OUT-L':  'Perimeter — Academic North Courtyard',
+    'AB-OUT-R':  'Perimeter — Academic South / East Alley',
+    'LB-OUT-L':  'Perimeter — Laboratory West Gate Approach',
+    'LB-OUT-R':  'Perimeter — Laboratory Courtyard Approach',
+  };
+
+  const groups = {
+    'Campus Perimeter & Gates': [],
+    'Tech Pro Building (TPB)': [],
+    'Academic Building (AB)': [],
+    'Laboratory Building (LB)': [],
+  };
+
+  Object.values(devs).forEach(d => {
+    const id = d.device_id;
+    if (d.kind === 'outdoor' || id.includes('OUT')) {
+      const desc = outdoorDescs[id] || `${id} (Ground Exterior)`;
+      groups['Campus Perimeter & Gates'].push({ id, label: desc });
+    } else if (id.startsWith('TPB') || id.startsWith('B1')) {
+      const cov = d.covered_rooms?.length ? `Rooms ${d.covered_rooms.join(', ')}` : `Floor ${d.floor}`;
+      groups['Tech Pro Building (TPB)'].push({ id, label: `${id} (Floor ${d.floor} ${d.side === 'L' ? 'Left' : 'Right'} — ${cov})` });
+    } else if (id.startsWith('AB') || id.startsWith('B2')) {
+      const cov = d.covered_rooms?.length ? `Rooms ${d.covered_rooms.join(', ')}` : `Floor ${d.floor}`;
+      groups['Academic Building (AB)'].push({ id, label: `${id} (Floor ${d.floor} ${d.side === 'L' ? 'Left' : 'Right'} — ${cov})` });
+    } else if (id.startsWith('LB') || id.startsWith('B3')) {
+      const cov = d.covered_rooms?.length ? `Rooms ${d.covered_rooms.join(', ')}` : `Floor ${d.floor}`;
+      groups['Laboratory Building (LB)'].push({ id, label: `${id} (Floor ${d.floor} ${d.side === 'L' ? 'Left' : 'Right'} — ${cov})` });
+    }
+  });
+
+  selectEl.innerHTML = Object.entries(groups)
+    .filter(([_, list]) => list.length > 0)
+    .map(([grp, list]) => `<optgroup label="${grp}">${list.map(item => `<option value="${item.id}">${item.label}</option>`).join('')}</optgroup>`)
+    .join('');
+}
+
+async function submitModalVideoUpload() {
+  const fileInput = document.getElementById('modal-video-file');
+  const devSelect = document.getElementById('modal-upload-device');
+  const progress = document.getElementById('modal-upload-progress');
+  const statusTxt = document.getElementById('modal-upload-status');
+  const submitBtn = document.getElementById('modal-upload-submit');
+
+  if (!fileInput || !fileInput.files.length) {
+    toast('Please select a video file first.', 'warning');
+    return;
+  }
+  const file = fileInput.files[0];
+  const targetDev = devSelect ? devSelect.value : 'TPB-CAM-OUT-L';
+
+  if (progress) progress.style.display = 'block';
+  if (statusTxt) statusTxt.textContent = `Analyzing ${file.name} with YOLOv8 & audio extraction on ${targetDev}...`;
+  if (submitBtn) submitBtn.disabled = true;
+
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('device_ids', targetDev);
+
+  try {
+    const res = await fetch(API + '/api/upload-video', {
+      method: 'POST',
+      body: formData,
+    });
+    const data = await res.json();
+
+    if (res.ok) {
+      closeUploadModal();
+      if (data.criteria_passed) {
+        toast(`THREAT VERIFIED on ${targetDev} (${data.level} · Index ${data.threat_index.toFixed(1)}/100). Evacuation simulation initiated!`, 'critical');
+      } else {
+        toast(`Video ingested on ${targetDev}. Threat criteria NOT met (${data.level} · Index ${data.threat_index.toFixed(1)}/100). Campus remains ALL CLEAR.`, 'info');
+      }
+      await refresh();
+    } else {
+      toast(`Upload error: ${data.detail || 'Inference failed'}`, 'error');
+    }
+  } catch (err) {
+    toast(`Video upload failed: ${err.message}`, 'error');
+  } finally {
+    if (progress) progress.style.display = 'none';
+    if (submitBtn) submitBtn.disabled = false;
+  }
 }

@@ -25,6 +25,7 @@ from dynamic_evacuation import (
     classify_threat, calculate_threat_index,
 )
 from demo_detector import prebaked_scenarios
+import database
 from real_detector import (
     load_detections, observations_from_json, clear_detections,
     save_detections, analyze_video_feed,
@@ -33,6 +34,8 @@ from real_detector import (
 # ---------------------------------------------------------------------------
 # App Setup
 # ---------------------------------------------------------------------------
+database.init_db()
+
 app = FastAPI(
     title="SENTINEL — Campus Safety Command API",
     version="2.0.0",
@@ -204,6 +207,11 @@ async def get_snapshot():
                 "incident_id": getattr(ev, "incident_id", None),
             })
 
+    try:
+        database.save_evacuation_states(routes_out)
+    except Exception as e:
+        print(f"Notice: evacuation_states db save: {e}")
+
     return {
         "global_status": status,
         "counts": counts,
@@ -306,6 +314,10 @@ async def set_scenario(req: ScenarioRequest):
     if req.scenario not in valid:
         raise HTTPException(status_code=400, detail=f"Unknown scenario. Valid: {valid}")
     _state["scenario"] = req.scenario
+    try:
+        database.log_audit("SET_SCENARIO", "OPERATOR", {"scenario": req.scenario})
+    except Exception:
+        pass
     return {"ok": True, "active_scenario": req.scenario}
 
 
@@ -404,7 +416,30 @@ async def upload_video(
         
     save_detections(current_records)
     _state["scenario"] = "all_clear"
-    return {"ok": True, "devices": dev_list, "records_added": len(dev_list)}
+    
+    clf = base_rec.get("classification", {})
+    level = clf.get("level", "NORMAL")
+    passed = level in ("CRITICAL", "WARNING")
+    
+    return {
+        "ok": True,
+        "devices": dev_list,
+        "device_id": dev_list[0],
+        "records_added": len(dev_list),
+        "level": level,
+        "threat_index": clf.get("index", 0.0),
+        "object_score": base_rec.get("scores", {}).get("object", 0.0),
+        "pose_score": base_rec.get("scores", {}).get("pose", 0.0),
+        "acoustic_score": base_rec.get("scores", {}).get("acoustic", 0.0),
+        "verified": clf.get("verified", False),
+        "criteria_passed": passed,
+        "video_url": f"/videos-project/{save_path.name}",
+        "message": (
+            f"THREAT VERIFIED: {level} (Threat Index: {clf.get('index', 0):.1f}/100). Evacuation simulation initiated!"
+            if passed
+            else f"Criteria Not Met: Classified as {level} (Threat Index: {clf.get('index', 0):.1f}/100). No evacuation needed."
+        )
+    }
 
 
 @app.post("/api/detections/clear")
@@ -440,3 +475,42 @@ async def mqtt_broadcast():
     """Trigger MQTT broadcast to Wokwi ESP32 (non-blocking)."""
     threading.Thread(target=_mqtt_broadcast, daemon=True).start()
     return {"ok": True, "message": "MQTT broadcast dispatched."}
+
+
+# ---------------------------------------------------------------------------
+# Database Management Endpoints (DBA & Audit)
+# ---------------------------------------------------------------------------
+@app.get("/api/db/stats")
+async def get_db_stats():
+    """Return database metrics, table record counts, and storage metrics."""
+    try:
+        stats = database.get_database_stats()
+        return {"ok": True, "stats": stats}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/db/incidents")
+async def get_db_incidents():
+    """List threat incidents recorded in sentinel.db."""
+    try:
+        with database.get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM threat_incidents ORDER BY started_at DESC LIMIT 50;")
+            rows = [dict(r) for r in cursor.fetchall()]
+            return {"ok": True, "incidents": rows}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/db/audit-logs")
+async def get_db_audit_logs():
+    """List administrative audit trail records."""
+    try:
+        with database.get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM system_audit_logs ORDER BY created_at DESC LIMIT 50;")
+            rows = [dict(r) for r in cursor.fetchall()]
+            return {"ok": True, "audit_logs": rows}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

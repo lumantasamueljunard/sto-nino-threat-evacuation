@@ -14,6 +14,7 @@ import subprocess
 import uuid
 from datetime import datetime
 import numpy as np
+import database
 
 from dynamic_evacuation import DEVICES, Observation, classify_threat
 
@@ -25,7 +26,14 @@ DETECTIONS_JSON = os.path.join(BASE_DIR, "detections.json")
 
 
 def load_detections(path=DETECTIONS_JSON):
-    """Return the raw list of detection records, or [] if missing/empty."""
+    """Return detection records from sentinel.db, falling back to JSON file."""
+    try:
+        db_records = database.get_all_detections()
+        if db_records:
+            return db_records
+    except Exception:
+        pass
+
     if not os.path.exists(path):
         return []
     try:
@@ -37,21 +45,34 @@ def load_detections(path=DETECTIONS_JSON):
 
 
 def save_detections(records, path=DETECTIONS_JSON):
-    """Persist a list of detection records to the JSON file."""
+    """Persist a list of detection records to detections.json and sentinel.db."""
     with open(path, "w", encoding="utf-8") as f:
         json.dump(records, f, indent=2)
+    try:
+        if not records:
+            database.clear_all_detections()
+        else:
+            for r in records:
+                database.record_detection(r)
+    except Exception as e:
+        print(f"Database sync notice: {e}")
 
 
 def append_detection(record, path=DETECTIONS_JSON):
-    """Append a single detection record to detections.json."""
+    """Append a single detection record to detections.json and sentinel.db."""
     records = load_detections(path)
     records.append(record)
     save_detections(records, path)
 
 
 def clear_detections(path=DETECTIONS_JSON):
-    """Clear all records in detections.json."""
-    save_detections([], path)
+    """Clear all records in detections.json and archive active incidents in sentinel.db."""
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump([], f, indent=2)
+    try:
+        database.clear_all_detections()
+    except Exception as e:
+        print(f"Database clear notice: {e}")
 
 
 def observations_from_json(path=DETECTIONS_JSON):
