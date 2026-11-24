@@ -9,9 +9,13 @@ Implements a relational SQLite database (sentinel.db) adhering to:
 - Audit logging for administrative traceability
 """
 
+import hashlib
+import hmac
 import os
 import json
+import secrets
 import sqlite3
+import time
 from datetime import datetime
 from contextlib import contextmanager
 
@@ -20,7 +24,7 @@ from contextlib import contextmanager
 # ---------------------------------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_FILE = os.path.join(BASE_DIR, "sentinel.db")
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 3
 
 
 @contextmanager
@@ -77,8 +81,84 @@ def init_db(db_path=DB_FILE):
                 (1, "Baseline 3NF normalized schema for SENTINEL campus safety system.")
             )
 
-    # Seed static campus topology if tables are empty
+        if current_version < 2:
+            _apply_migration_v2(cursor)
+            cursor.execute(
+                "INSERT INTO schema_migrations (version, description) VALUES (?, ?);",
+                (2, "Add facility_overrides table and FACILITY_UNAVAILABLE directive support.")
+            )
+
+        if current_version < 3:
+            _apply_migration_v3(cursor)
+            cursor.execute(
+                "INSERT INTO schema_migrations (version, description) VALUES (?, ?);",
+                (3, "Add RBAC users and persistent user_sessions tables for Personnel and IT Technician auth.")
+            )
+
+    # Seed static campus topology and default staff accounts if tables are empty
     seed_static_data(db_path)
+
+
+def _apply_migration_v3(cursor):
+    """Migration V3: Create users and user_sessions tables for role-based access control."""
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            full_name TEXT NOT NULL,
+            role TEXT NOT NULL CHECK (role IN ('PERSONNEL', 'IT_TECHNICIAN')),
+            password_hash TEXT NOT NULL,
+            salt TEXT NOT NULL,
+            is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_sessions (
+            token TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            expires_at REAL NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(user_id) ON UPDATE CASCADE ON DELETE CASCADE
+        );
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON user_sessions(user_id);")
+
+
+def _apply_migration_v2(cursor):
+    """Migration V2: Support persisted non-threat personnel facility unavailability."""
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS facility_overrides (
+            node_id TEXT PRIMARY KEY,
+            node_type TEXT NOT NULL DEFAULT 'room' CHECK (node_type IN ('room', 'corridor', 'corridor_floor', 'stair')),
+            condition TEXT NOT NULL DEFAULT 'UNAVAILABLE',
+            assigned_by TEXT NOT NULL DEFAULT 'PERSONNEL',
+            notes TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+
+    # Rebuild evacuation_states so directive CHECK allows FACILITY_UNAVAILABLE cleanly
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS evacuation_states_v2 (
+            room_id TEXT PRIMARY KEY,
+            chosen_gate TEXT,
+            chosen_door TEXT,
+            path_sequence TEXT,
+            path_cost REAL NOT NULL DEFAULT 0.0,
+            directive TEXT NOT NULL CHECK (directive IN ('MODELED_ROUTE_AVAILABLE', 'HOLD_FOR_AUTHORIZED_GUIDANCE', 'NO_CONFIRMED_ROUTE', 'FACILITY_UNAVAILABLE')),
+            reason TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (room_id) REFERENCES rooms(room_id) ON UPDATE CASCADE ON DELETE CASCADE,
+            FOREIGN KEY (chosen_gate) REFERENCES campus_gates(gate_id) ON UPDATE CASCADE ON DELETE SET NULL,
+            FOREIGN KEY (chosen_door) REFERENCES room_doors(door_id) ON UPDATE CASCADE ON DELETE SET NULL
+        );
+    """)
+    cursor.execute("INSERT OR IGNORE INTO evacuation_states_v2 SELECT * FROM evacuation_states;")
+    cursor.execute("DROP TABLE evacuation_states;")
+    cursor.execute("ALTER TABLE evacuation_states_v2 RENAME TO evacuation_states;")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_evac_dir ON evacuation_states(directive);")
 
 
 def _apply_migration_v1(cursor):
@@ -292,6 +372,20 @@ def seed_static_data(db_path=DB_FILE):
                     (did, bldg, dev_type, floor, zone, json.dumps(covered))
                 )
 
+        # 5. Seed Default Personnel & IT Technician Accounts if empty
+        cursor.execute("SELECT COUNT(*) FROM users;")
+        if cursor.fetchone()[0] == 0:
+            defaults = [
+                ("safety.officer", "School DRRM Officer", "PERSONNEL", "Sentinel@2026"),
+                ("it.tech", "Campus IT Technician", "IT_TECHNICIAN", "TechAdmin@2026"),
+            ]
+            for uname, fname, role, pw in defaults:
+                pw_hash, salt_hex = hash_password(pw)
+                cursor.execute(
+                    "INSERT INTO users (username, full_name, role, password_hash, salt) VALUES (?, ?, ?, ?, ?);",
+                    (uname, fname, role, pw_hash, salt_hex)
+                )
+
 
 # ---------------------------------------------------------------------------
 # Data Access Repository Functions (CRUD & Analytics)
@@ -400,6 +494,30 @@ def get_all_detections(db_path=DB_FILE):
         return records
 
 
+def resolve_active_incidents(resolution_notes="Threat apprehended & evacuation secured", resolved_by="DRRM_OFFICER", db_path=DB_FILE):
+    """Formally resolve active incidents with stand-down notes and clear live threat alerts."""
+    with get_db_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """UPDATE threat_incidents
+               SET status = 'RESOLVED', resolved_at = CURRENT_TIMESTAMP, notes = ?
+               WHERE status = 'ACTIVE';""",
+            (resolution_notes,)
+        )
+        resolved_count = cursor.rowcount
+        cursor.execute("DELETE FROM threat_detections;")
+        cursor.execute("UPDATE devices SET status = 'ONLINE', updated_at = CURRENT_TIMESTAMP;")
+        cursor.execute(
+            "INSERT INTO system_audit_logs (action, actor, details) VALUES (?, ?, ?);",
+            (
+                "INCIDENT_RESOLVED",
+                resolved_by,
+                json.dumps({"resolved_count": resolved_count, "notes": resolution_notes}),
+            ),
+        )
+        return resolved_count
+
+
 def clear_all_detections(db_path=DB_FILE):
     """Safely archive active incidents and clear detections table."""
     with get_db_connection(db_path) as conn:
@@ -453,6 +571,34 @@ def get_evacuation_states(db_path=DB_FILE):
         return out
 
 
+def get_facility_overrides(db_path=DB_FILE):
+    """Return list of persisted non-threat unavailable facility node IDs."""
+    with get_db_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT node_id, node_type, condition, assigned_by, created_at FROM facility_overrides ORDER BY created_at ASC;")
+        return [dict(r) for r in cursor.fetchall()]
+
+
+def replace_facility_overrides(node_ids, assigned_by="PERSONNEL", db_path=DB_FILE):
+    """Persist the complete active list of unavailable facility nodes."""
+    with get_db_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM facility_overrides;")
+        for nid in node_ids:
+            if nid.endswith("-CORRIDOR"):
+                ntype = "corridor_floor"
+            elif "-STAIR-" in nid:
+                ntype = "stair"
+            elif "-C" in nid:
+                ntype = "corridor"
+            else:
+                ntype = "room"
+            cursor.execute(
+                "INSERT INTO facility_overrides (node_id, node_type, condition, assigned_by) VALUES (?, ?, 'UNAVAILABLE', ?);",
+                (nid, ntype, assigned_by)
+            )
+
+
 def update_gate_statuses(gate_states, db_path=DB_FILE):
     """Synchronize real-time gate statuses (OPEN, BLOCKED, COMPROMISED) in campus_gates."""
     with get_db_connection(db_path) as conn:
@@ -463,6 +609,116 @@ def update_gate_statuses(gate_states, db_path=DB_FILE):
                 "UPDATE campus_gates SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE gate_id = ?;",
                 (valid_st, gate_id)
             )
+
+
+def hash_password(password: str, salt_hex: str | None = None) -> tuple[str, str]:
+    """Hash password with PBKDF2-HMAC-SHA256 and per-user cryptographic salt."""
+    salt_bytes = bytes.fromhex(salt_hex) if salt_hex else secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt_bytes, 120000)
+    return digest.hex(), salt_bytes.hex()
+
+
+def create_user(username: str, full_name: str, role: str, password: str, db_path=DB_FILE):
+    """Create a new PERSONNEL or IT_TECHNICIAN account."""
+    uname = username.strip().lower()
+    if role not in ("PERSONNEL", "IT_TECHNICIAN"):
+        raise ValueError("Invalid role; must be PERSONNEL or IT_TECHNICIAN.")
+    pw_hash, salt_hex = hash_password(password)
+    with get_db_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 FROM users WHERE username = ?;", (uname,))
+        if cursor.fetchone():
+            raise ValueError(f"Username '{uname}' is already registered.")
+        cursor.execute(
+            "INSERT INTO users (username, full_name, role, password_hash, salt) VALUES (?, ?, ?, ?, ?);",
+            (uname, full_name.strip(), role, pw_hash, salt_hex)
+        )
+        uid = cursor.lastrowid
+        cursor.execute(
+            "INSERT INTO system_audit_logs (action, actor, details) VALUES ('USER_REGISTER', ?, ?);",
+            (uname, json.dumps({"role": role, "full_name": full_name.strip()}))
+        )
+        return {"user_id": uid, "username": uname, "full_name": full_name.strip(), "role": role}
+
+
+def authenticate_user(username: str, password: str, ttl_hours: int = 12, db_path=DB_FILE):
+    """Verify credentials and issue a persisted session token."""
+    uname = username.strip().lower()
+    with get_db_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE username = ? AND is_active = 1;", (uname,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        candidate_hash, _ = hash_password(password, row["salt"])
+        if not hmac.compare_digest(candidate_hash, row["password_hash"]):
+            return None
+
+        token = secrets.token_urlsafe(32)
+        expires_at = time.time() + (ttl_hours * 3600)
+        cursor.execute("DELETE FROM user_sessions WHERE expires_at < ?;", (time.time(),))
+        cursor.execute(
+            "INSERT INTO user_sessions (token, user_id, expires_at) VALUES (?, ?, ?);",
+            (token, row["user_id"], expires_at)
+        )
+        cursor.execute(
+            "INSERT INTO system_audit_logs (action, actor, details) VALUES ('USER_LOGIN', ?, ?);",
+            (uname, json.dumps({"role": row["role"]}))
+        )
+        return {
+            "token": token,
+            "expires_at": expires_at,
+            "user": {
+                "user_id": row["user_id"],
+                "username": row["username"],
+                "full_name": row["full_name"],
+                "role": row["role"],
+            },
+        }
+
+
+def get_session_user(token: str | None, db_path=DB_FILE):
+    """Look up an active non-expired session token and return user info."""
+    if not token:
+        return None
+    with get_db_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """SELECT u.user_id, u.username, u.full_name, u.role, s.expires_at
+               FROM user_sessions s
+               JOIN users u ON s.user_id = u.user_id
+               WHERE s.token = ? AND u.is_active = 1;""",
+            (token,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        if row["expires_at"] < time.time():
+            cursor.execute("DELETE FROM user_sessions WHERE token = ?;", (token,))
+            return None
+        return {
+            "user_id": row["user_id"],
+            "username": row["username"],
+            "full_name": row["full_name"],
+            "role": row["role"],
+        }
+
+
+def revoke_session(token: str | None, db_path=DB_FILE):
+    """Invalidate a session token on logout."""
+    if not token:
+        return
+    with get_db_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM user_sessions WHERE token = ?;", (token,))
+
+
+def list_users(db_path=DB_FILE):
+    """Return non-sensitive registered accounts for IT Technician management."""
+    with get_db_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id, username, full_name, role, is_active, created_at FROM users ORDER BY user_id ASC;")
+        return [dict(r) for r in cursor.fetchall()]
 
 
 def log_audit(action, actor="SYSTEM", details=None, ip_address=None, db_path=DB_FILE):

@@ -89,16 +89,18 @@ html, body {
 
 /* ── Topbar (Gemini Clean Header + Pill Navigation) ────────── */
 .topbar {
-  height: 60px;
+  min-height: 60px;
+  height: auto;
   background: var(--c-bg);
   border-bottom: 1px solid var(--c-border);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 20px 0 14px;
+  flex-wrap: wrap;
+  padding: 8px 18px 8px 14px;
   flex-shrink: 0;
   z-index: 30;
-  gap: 16px;
+  gap: 10px;
 }
 
 .topbar-left {
@@ -347,16 +349,12 @@ select, .input-select {
   color: var(--c-navy);
   border: 1px solid var(--c-border);
   border-radius: var(--r-sm);
-  padding: 0 28px 0 10px;
+  padding: 0 10px;
   font-family: inherit;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   outline: none;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 9px center;
   transition: border-color var(--t-fast), background var(--t-fast);
 }
 select:hover, .input-select:hover {
@@ -416,6 +414,11 @@ select:focus, .input-select:focus {
   border-color: var(--c-red-bdr);
   border-left-color: var(--c-red);
 }
+.inspector-card.unavail {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  border-left-color: #64748b;
+}
 
 .ins-status {
   font-size: 11.5px;
@@ -425,6 +428,7 @@ select:focus, .input-select:focus {
 }
 .inspector-card.warning .ins-status { color: var(--c-amber-text); }
 .inspector-card.critical .ins-status { color: var(--c-red-text); }
+.inspector-card.unavail .ins-status { color: #334155; }
 
 .ins-grid {
   display: grid;
@@ -583,11 +587,11 @@ select:focus, .input-select:focus {
   opacity: 0.9;
 }
 
-/* ── Fixed-Height KPI Strip (4 Equal Cards) ───────────────── */
+/* ── Fixed-Height KPI Strip (5 Equal Cards) ───────────────── */
 .metrics-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 10px;
   flex-shrink: 0;
 }
 
@@ -596,7 +600,7 @@ select:focus, .input-select:focus {
   background: var(--c-surface-2);
   border: 1px solid var(--c-border);
   border-radius: var(--r-md);
-  padding: 12px 16px;
+  padding: 12px 14px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -604,6 +608,10 @@ select:focus, .input-select:focus {
 .metric-card.safe-card {
   background: var(--c-green-bg);
   border-color: var(--c-green-bdr);
+}
+.metric-card.unavail-card {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
 }
 .metric-card.hold-card {
   background: var(--c-amber-bg);
@@ -627,6 +635,7 @@ select:focus, .input-select:focus {
   color: var(--c-muted);
 }
 .metric-card.safe-card .metric-label { color: var(--c-green-text); }
+.metric-card.unavail-card .metric-label { color: #334155; }
 .metric-card.hold-card .metric-label { color: var(--c-amber-text); }
 .metric-card.threat-card .metric-label { color: var(--c-red-text); }
 
@@ -638,12 +647,13 @@ select:focus, .input-select:focus {
 
 .metric-val {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 28px;
+  font-size: 26px;
   font-weight: 800;
   color: var(--c-navy);
   line-height: 1;
 }
 .metric-card.safe-card .metric-val { color: var(--c-green); }
+.metric-card.unavail-card .metric-val { color: #475569; }
 .metric-card.hold-card .metric-val { color: var(--c-amber); }
 .metric-card.threat-card .metric-val { color: var(--c-red); }
 
@@ -899,6 +909,21 @@ select:focus, .input-select:focus {
   background: var(--c-red-bg);
   color: var(--c-red-text);
   border: 1px solid var(--c-red-bdr);
+}
+.badge.unavail {
+  background: #f1f5f9;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+}
+.tag-chip.unavail {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #334155;
+}
+.data-table tr.row-unavail { background: rgba(100, 116, 139, 0.08); }
+.hw-led-bulb.U {
+  background: #64748b;
+  box-shadow: 0 0 6px rgba(100, 116, 139, 0.55);
 }
 
 /* ── Data Table & Logs (Tab 2) ────────────────────────────── */
@@ -1306,6 +1331,27 @@ select:focus, .input-select:focus {
 .icon-sm { width: 14px; height: 14px; }
 .icon-md { width: 18px; height: 18px; }
 
+.btn:disabled,
+.btn.btn-scanning {
+  opacity: 0.65;
+  pointer-events: none;
+  cursor: not-allowed;
+}
+
+.spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: spin-rot 0.7s linear infinite;
+  display: inline-block;
+}
+
+@keyframes spin-rot {
+  to { transform: rotate(360deg); }
+}
+
 .empty-state {
   padding: 28px 16px;
   text-align: center;
@@ -1317,4 +1363,380 @@ select:focus, .input-select:focus {
   .metrics-grid { grid-template-columns: repeat(2, 1fr); }
   .floor-grid { grid-template-columns: 1fr; }
   .data-split-grid { grid-template-columns: 1fr; }
+  .hw-grid-top { grid-template-columns: 1fr; }
+}
+
+/* ── Topbar ESP32 Link Pill ──────────────────────────────── */
+.hw-link-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
+  color: var(--c-slate);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all var(--t-fast);
+}
+.hw-link-pill:hover {
+  border-color: var(--c-blue);
+  background: var(--c-blue-bg);
+}
+
+/* ── Hardware Twin Tab ───────────────────────────────────── */
+.hw-meta-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.hw-chip-mono {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--c-muted);
+  background: var(--c-pill-bg);
+  padding: 4px 10px;
+  border-radius: var(--r-pill);
+}
+
+.hw-grid-top {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+}
+
+.hw-card-body {
+  padding: 14px;
+  height: 152px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* Virtual SSD1306 OLED */
+.oled-screen {
+  background: #070b14;
+  border: 2px solid #334155;
+  border-radius: 10px;
+  padding: 10px 14px;
+  color: #38bdf8;
+  font-family: 'JetBrains Mono', monospace;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-shadow: inset 0 0 18px rgba(56, 189, 248, 0.14);
+}
+.oled-row-top {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  border-bottom: 1px solid rgba(56, 189, 248, 0.35);
+  padding-bottom: 4px;
+}
+.oled-status {
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #e0f2fe;
+}
+.oled-line {
+  font-size: 11px;
+  color: #7dd3fc;
+}
+
+/* Edge Acoustic & Health Telemetry Card */
+.hw-sensor-body {
+  justify-content: space-between;
+  gap: 10px;
+}
+.acoustic-meter-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.acoustic-bar-track {
+  width: 100%;
+  height: 12px;
+  border-radius: var(--r-pill);
+  background: var(--c-pill-bg);
+  overflow: hidden;
+  border: 1px solid var(--c-border);
+}
+.acoustic-bar-fill {
+  height: 100%;
+  border-radius: var(--r-pill);
+  background: var(--c-green);
+  transition: width 260ms ease, background 200ms ease;
+}
+.acoustic-bar-fill.warn { background: var(--c-amber); }
+.acoustic-bar-fill.crit { background: var(--c-red); }
+.hw-kv-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding-top: 6px;
+  border-top: 1px solid var(--c-border);
+}
+.hw-kv {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Addressable 12-Channel Zone LED Strip */
+.hw-led-strip {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 10px;
+  padding: 14px;
+}
+.hw-led-node {
+  height: 62px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-2);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.hw-led-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.hw-led-id {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+  font-weight: 800;
+  color: var(--c-navy);
+}
+.hw-led-bulb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--c-green);
+  box-shadow: 0 0 8px rgba(5, 150, 105, 0.6);
+}
+.hw-led-bulb.H {
+  background: var(--c-amber);
+  box-shadow: 0 0 10px rgba(217, 119, 6, 0.75);
+}
+.hw-led-bulb.T {
+  background: var(--c-red);
+  box-shadow: 0 0 10px rgba(220, 38, 38, 0.85);
+}
+.hw-led-sub {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--c-muted);
+}
+
+/* Live MQTT Packet Stream */
+.mqtt-log-list {
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+}
+.mqtt-pkt-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 7px 10px;
+  border-radius: var(--r-xs);
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-border);
+}
+.mqtt-dir {
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  font-size: 10px;
+}
+.mqtt-dir.TX { background: var(--c-blue-bg); color: var(--c-blue); }
+.mqtt-dir.RX { background: var(--c-green-bg); color: var(--c-green-text); }
+.mqtt-dir.SYS { background: var(--c-pill-bg); color: var(--c-muted); }
+/* ── Role-Based UI Visibility ───────────────────────────── */
+body[data-auth="public"] .staff-only,
+body[data-auth="public"] .it-only {
+  display: none !important;
+}
+body[data-auth="PERSONNEL"] .public-only,
+body[data-auth="PERSONNEL"] .it-only,
+body[data-auth="IT_TECHNICIAN"] .public-only {
+  display: none !important;
+}
+
+.user-session-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 10px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
+  font-size: 11.5px;
+}
+.user-role-dot {
+  font-size: 9.5px;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: var(--r-pill);
+  background: var(--c-pill-active);
+  color: var(--c-pill-text);
+}
+.btn-logout-mini {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-2);
+  color: var(--c-slate);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.btn-logout-mini:hover {
+  background: var(--c-red-bg);
+  color: var(--c-red-text);
+  border-color: var(--c-red-bdr);
+}
+
+/* ── Public Occupant Floor Locator ──────────────────────── */
+.floor-locator-bar {
+  background: var(--c-blue-bg);
+  border: 1px solid var(--c-blue-bdr);
+  border-radius: var(--r-md);
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.locator-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.locator-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.locator-select {
+  width: auto !important;
+  min-width: 155px;
+  height: 34px !important;
+  background-color: var(--c-surface) !important;
+}
+
+.occupant-guidance-card {
+  padding: 12px 16px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--c-green-bdr);
+  background: var(--c-green-bg);
+  color: var(--c-green-text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.occupant-guidance-card.warning {
+  background: var(--c-amber-bg);
+  border-color: var(--c-amber-bdr);
+  color: var(--c-amber-text);
+}
+.occupant-guidance-card.critical {
+  background: var(--c-red-bg);
+  border-color: var(--c-red-bdr);
+  color: var(--c-red-text);
+}
+.occupant-guidance-card.unavail {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #334155;
+}
+
+.floor-card.focused-floor {
+  border: 2.5px solid var(--c-blue);
+  box-shadow: 0 0 0 3px rgba(11, 87, 208, 0.14);
+}
+.floor-grid.single-floor-focus {
+  grid-template-columns: 1fr;
+}
+
+.threat-loc-bar {
+  padding: 10px 16px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--c-green-bdr);
+  background: var(--c-green-bg);
+  color: var(--c-green-text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.threat-loc-bar.warning {
+  background: var(--c-amber-bg);
+  border-color: var(--c-amber-bdr);
+  color: var(--c-amber-text);
+}
+.threat-loc-bar.critical {
+  background: var(--c-red-bg);
+  border-color: var(--c-red-bdr);
+  color: var(--c-red-text);
+}
+
+/* ── Auth Modal Inputs ──────────────────────────────────── */
+.text-input {
+  width: 100%;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-2);
+  color: var(--c-navy);
+  font-family: inherit;
+  font-size: 12.5px;
+  outline: none;
+}
+.text-input:focus {
+  border-color: var(--c-blue);
+  background: var(--c-surface);
+}
+.demo-creds-box {
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: var(--c-surface-2);
+  border: 1px dashed var(--c-border);
+}
+.auth-error {
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: var(--c-red-bg);
+  border: 1px solid var(--c-red-bdr);
+  color: var(--c-red-text);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.mqtt-pkt-payload {
+  color: var(--c-slate);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

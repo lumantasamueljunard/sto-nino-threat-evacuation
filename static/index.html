@@ -4,15 +4,15 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SENTINEL — Campus Safety Command · Sto. Niño SHS</title>
-  <link rel="stylesheet" href="/static/style.css?v=4.0" />
+  <link rel="stylesheet" href="/static/style.css?v=5.2" />
 </head>
-<body>
+<body data-auth="public">
 <div class="app-shell">
 
   <!-- ══ TOPBAR (GEMINI HEADER + PILL NAVIGATION) ══════════════════ -->
   <header class="topbar">
     <div class="topbar-left">
-      <button class="icon-btn-rail" onclick="toggleSidebar()" title="Toggle Command Sidebar">
+      <button id="sidebar-toggle-btn" class="icon-btn-rail staff-only" onclick="toggleSidebar()" title="Toggle Command Sidebar">
         <svg class="icon icon-md" viewBox="0 0 24 24">
           <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
         </svg>
@@ -25,13 +25,13 @@
       <div class="brand-text-group">
         <div class="brand-title">
           SENTINEL
-          <span class="brand-tag">COMMAND</span>
+          <span class="brand-tag" id="brand-mode-tag">CAMPUS EVACUATION MAP</span>
         </div>
         <div class="brand-subtitle">Sto. Niño Senior High School &middot; Tacloban City</div>
       </div>
     </div>
 
-    <!-- Primary Gemini Pill Navigation -->
+    <!-- Primary Gemini Pill Navigation (Role-Gated) -->
     <nav class="topbar-nav">
       <button class="nav-pill active" id="tab-btn-map" onclick="switchTab('map')">
         <svg class="icon icon-sm" viewBox="0 0 24 24">
@@ -40,25 +40,50 @@
         </svg>
         Map &amp; Blueprints
       </button>
-      <button class="nav-pill" id="tab-btn-data" onclick="switchTab('data')">
+      <button class="nav-pill staff-only" id="tab-btn-data" onclick="switchTab('data')">
         <svg class="icon icon-sm" viewBox="0 0 24 24">
           <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/>
         </svg>
         Room Status &amp; Logs
       </button>
-      <button class="nav-pill" id="tab-btn-cctv" onclick="switchTab('cctv')">
+      <button class="nav-pill staff-only" id="tab-btn-cctv" onclick="switchTab('cctv')">
         <svg class="icon icon-sm" viewBox="0 0 24 24">
           <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
         </svg>
         CCTV Matrix
       </button>
+      <button class="nav-pill it-only" id="tab-btn-hardware" onclick="switchTab('hardware')">
+        <svg class="icon icon-sm" viewBox="0 0 24 24">
+          <rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/>
+          <line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/>
+          <line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/>
+          <line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/>
+          <line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/>
+        </svg>
+        Hardware Twin (ESP32)
+      </button>
     </nav>
 
-    <!-- Global Campus Status Pill -->
+    <!-- Global Campus Status + Staff Auth Controls -->
     <div class="topbar-right">
+      <button class="hw-link-pill it-only" id="topbar-esp-pill" onclick="switchTab('hardware')" title="Inspect Wokwi ESP32 Gateway Telemetry">
+        <span class="status-beacon" id="topbar-esp-beacon"></span>
+        <span id="topbar-esp-text">ESP32 TWIN</span>
+      </button>
       <div id="global-status-pill" class="global-status-pill">
         <span id="global-beacon" class="status-beacon"></span>
         <span id="global-status-text">ALL CLEAR</span>
+      </div>
+      <button id="auth-signin-btn" class="btn btn-tonal public-only" onclick="openAuthModal('login')">
+        <svg class="icon icon-sm" viewBox="0 0 24 24">
+          <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/>
+        </svg>
+        Staff / IT Login
+      </button>
+      <div id="auth-user-pill" class="user-session-pill staff-only">
+        <span class="user-role-dot" id="user-role-badge">PERSONNEL</span>
+        <span id="user-display-name" style="font-weight:700; color:var(--c-navy);">User</span>
+        <button class="btn-logout-mini" onclick="logoutUser()" title="Sign Out">Sign Out</button>
       </div>
     </div>
   </header>
@@ -66,8 +91,8 @@
   <!-- ══ MAIN WORKSPACE ════════════════════════════════════════════ -->
   <div class="main-body">
 
-    <!-- ── GEMINI COLLAPSIBLE SIDEBAR ─────────────────────────── -->
-    <aside class="sidebar" id="app-sidebar">
+    <!-- ── GEMINI COLLAPSIBLE SIDEBAR (STAFF / IT ONLY) ────────── -->
+    <aside class="sidebar staff-only" id="app-sidebar">
 
       <!-- Primary Extended FAB Action Pill -->
       <div class="sb-hero-action">
@@ -146,24 +171,24 @@
         </div>
       </div>
 
-      <!-- 4. Manual Hazard Overrides -->
+      <!-- 4. Personnel Facility Status (Non-Threat Gray X) -->
       <div class="sb-section">
         <div class="sb-label-row">
-          <span class="sb-title">Manual Overrides</span>
-          <button id="btn-clear-blocks" onclick="clearBlocks()" style="display:none; background:none; border:none; color:var(--c-red); font-size:11px; font-weight:700; cursor:pointer;">Clear All</button>
+          <span class="sb-title">Facility Inspection (Gray X)</span>
+          <button id="btn-clear-facilities" onclick="clearFacilities()" style="display:none; background:none; border:none; color:var(--c-blue); font-size:11px; font-weight:700; cursor:pointer;">Re-open All</button>
         </div>
         <div class="hazard-select-grid">
-          <select id="sb-room-block-select" onchange="addBlock(this)">
-            <option value="">+ Block Classroom…</option>
+          <select id="sb-room-block-select" onchange="addUnavailableFacility(this)">
+            <option value="">+ Unavailable Classroom…</option>
           </select>
-          <select id="sb-corridor-select" onchange="addBlock(this)">
-            <option value="">+ Block Corridor…</option>
+          <select id="sb-corridor-select" onchange="addUnavailableFacility(this)">
+            <option value="">+ Unavailable Corridor…</option>
           </select>
-          <select id="sb-stair-select" onchange="addBlock(this)">
-            <option value="">+ Block Stairwell…</option>
+          <select id="sb-stair-select" onchange="addUnavailableFacility(this)">
+            <option value="">+ Unavailable Stairwell…</option>
           </select>
         </div>
-        <div id="block-tags" class="tag-list"></div>
+        <div id="facility-tags" class="tag-list"></div>
       </div>
 
     </aside>
@@ -178,11 +203,11 @@
           <span class="eb-title" id="eb-title">EMERGENCY ACTIVE</span>
           <span class="eb-sub" id="eb-sub">Dynamic evacuation routes computed across all 36 classrooms.</span>
         </div>
-        <button class="btn" onclick="resetAll()" style="height:28px; padding:0 12px; font-size:11px;">Clear Alert</button>
+        <button class="btn btn-primary staff-only" onclick="resolveEmergency()" style="height:30px; padding:0 14px; font-size:11.5px;">Threat Apprehended &middot; Secure Campus</button>
       </div>
 
-      <!-- Fixed-Height 4-Card KPI Strip -->
-      <div class="metrics-grid">
+      <!-- Fixed-Height 5-Card KPI Strip (Staff / IT Only) -->
+      <div class="metrics-grid staff-only">
         <div class="metric-card">
           <div class="metric-info">
             <span class="metric-label">Total Rooms</span>
@@ -196,6 +221,13 @@
             <span class="metric-sub">Open Gate Path</span>
           </div>
           <span class="metric-val" id="m-safe">36</span>
+        </div>
+        <div class="metric-card unavail-card">
+          <div class="metric-info">
+            <span class="metric-label">Unavailable (X)</span>
+            <span class="metric-sub">Maintenance / Closed</span>
+          </div>
+          <span class="metric-val" id="m-unavail">0</span>
         </div>
         <div class="metric-card hold-card">
           <div class="metric-info">
@@ -215,6 +247,45 @@
 
       <!-- ══ TAB 1: MAP & ARCHITECTURAL BLUEPRINTS ═════════════ -->
       <div id="tab-map" class="tab-panel active">
+
+        <!-- Threat Location / Avoid Zone Strip (Always Visible on Floor Displays) -->
+        <div id="public-threat-bar" class="threat-loc-bar">
+          <div style="display:flex; align-items:center; gap:9px;">
+            <span id="ptb-beacon" class="status-beacon"></span>
+            <span id="ptb-label" style="font-size:12px; font-weight:800; letter-spacing:0.03em;">THREAT LOCATION:</span>
+            <span id="ptb-zones" style="font-size:12.5px; font-weight:700;">NONE — ALL CAMPUS ZONES CLEAR</span>
+          </div>
+          <span id="ptb-action" style="font-size:11.5px; font-weight:600; opacity:0.9;">Normal Operations</span>
+        </div>
+
+        <!-- Public Occupant Floor & Location Quick-Selector -->
+        <div class="floor-locator-bar">
+          <div class="locator-title-group">
+            <svg class="icon icon-sm" viewBox="0 0 24 24" style="color:var(--c-blue);">
+              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
+            </svg>
+            <span style="font-size:12.5px; font-weight:800; color:var(--c-navy);">Where Are You Located?</span>
+            <span style="font-size:11.5px; color:var(--c-muted);">Choose your building &amp; floor to check safe exits</span>
+          </div>
+          <div class="locator-controls">
+            <select id="loc-bldg" class="locator-select" onchange="onLocatorBuildingChange()">
+              <option value="">Building (All Campus)…</option>
+              <option value="TPB">Tech Pro Building (TPB)</option>
+              <option value="AB">Academic Building (AB)</option>
+              <option value="LB">Laboratory Building (LB)</option>
+            </select>
+            <select id="loc-floor" class="locator-select" onchange="onLocatorFloorChange()">
+              <option value="">Select Floor…</option>
+            </select>
+            <select id="loc-room" class="locator-select" onchange="onLocatorRoomChange()">
+              <option value="">All Rooms on Floor</option>
+            </select>
+            <button class="btn" onclick="clearFloorLocation()" style="height:34px; padding:0 12px; font-size:11.5px;">Campus View</button>
+          </div>
+        </div>
+
+        <!-- Occupant Guidance Card (Appears when floor/room is selected) -->
+        <div id="occupant-guidance-card" class="occupant-guidance-card" style="display:none;"></div>
 
         <!-- Gemini Filter Pill Switcher + Concise Legend -->
         <div class="pill-toolbar">
@@ -238,6 +309,7 @@
 
           <div class="legend-bar">
             <span class="legend-chip"><span class="legend-dot" style="background:var(--c-green);"></span>Safe Egress</span>
+            <span class="legend-chip"><span class="legend-dot" style="background:#64748b;"></span>Unavailable (X)</span>
             <span class="legend-chip"><span class="legend-dot" style="background:var(--c-amber);"></span>Hold in Place</span>
             <span class="legend-chip"><span class="legend-dot" style="background:var(--c-red);"></span>Threat / Blocked</span>
           </div>
@@ -333,14 +405,18 @@
             </div>
           </div>
 
-          <!-- Active Incidents Log -->
+          <!-- Active Incidents & Resolution Log -->
           <div class="panel-card">
             <div class="panel-card-header">
-              <span class="panel-card-title">Active Detections &amp; Alerts</span>
+              <span class="panel-card-title">Active Alerts &amp; Incident History</span>
               <button class="btn" onclick="clearDetections()" style="height:28px; padding:0 10px; font-size:11px;">Clear Logs</button>
             </div>
             <div id="event-log">
               <div class="empty-state">No active incidents. Campus secure.</div>
+            </div>
+            <div style="border-top:1px solid var(--c-border); padding:10px 14px; background:var(--c-surface-2);">
+              <div style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--c-muted); margin-bottom:6px;">Resolved Incident Archive (SQLite DB)</div>
+              <div id="resolved-incidents-log" style="display:flex; flex-direction:column; gap:6px; max-height:170px; overflow-y:auto;"></div>
             </div>
           </div>
 
@@ -381,6 +457,109 @@
         <div id="cam-grid" class="cam-grid"></div>
       </div><!-- /tab-cctv -->
 
+      <!-- ══ TAB 4: HARDWARE DIGITAL TWIN (WOKWI ESP32) ════════ -->
+      <div id="tab-hardware" class="tab-panel">
+
+        <!-- Telemetry Header Bar -->
+        <div class="pill-toolbar">
+          <div class="hw-meta-strip">
+            <span class="badge safe" id="hw-broker-badge">
+              <span class="status-beacon" id="hw-broker-dot" style="width:6px;height:6px;"></span>
+              <span id="hw-broker-text">MQTT: Connecting…</span>
+            </span>
+            <span class="badge warning" id="hw-node-badge">
+              <span class="status-beacon warning" id="hw-node-dot" style="width:6px;height:6px;"></span>
+              <span id="hw-node-text">Wokwi ESP32: Standby</span>
+            </span>
+            <span class="hw-chip-mono" id="hw-topic-label">Topic: stonino/campus/state</span>
+          </div>
+
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn btn-tonal" onclick="syncHardwareNow()">
+              Sync ESP32 Now
+            </button>
+            <button class="btn" onclick="simulateHardwareEdgeTrigger('TRIGGER')">
+              Simulate Break-Glass Trigger
+            </button>
+            <button class="btn" onclick="simulateHardwareEdgeTrigger('RESET')">
+              Hardware Reset
+            </button>
+          </div>
+        </div>
+
+        <!-- 2-Column Fixed-Height Twin Telemetry -->
+        <div class="hw-grid-top">
+
+          <!-- Virtual OLED Screen + Buzzer -->
+          <div class="panel-card">
+            <div class="panel-card-header">
+              <span class="panel-card-title">SSD1306 OLED &amp; Buzzer Output</span>
+              <span class="badge safe" id="hw-buzzer-badge">BUZZER: OFF</span>
+            </div>
+            <div class="hw-card-body">
+              <div class="oled-screen" id="hw-oled-screen">
+                <div class="oled-row-top">
+                  <span>SENTINEL SNSHS</span>
+                  <span id="oled-link">[SYNC]</span>
+                </div>
+                <div class="oled-status" id="oled-status">NORMAL</div>
+                <div class="oled-line">EVAC GATE: <b id="oled-gate">BOTH</b></div>
+                <div class="oled-line" id="oled-counts">S:36  H:0  T:0</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ESP32 Edge Acoustic Sensor & Health Telemetry -->
+          <div class="panel-card">
+            <div class="panel-card-header">
+              <span class="panel-card-title">ESP32 Acoustic Sensor &amp; Link Telemetry</span>
+              <span class="hw-chip-mono" id="hw-fw-badge">SENTINEL-GW-v2.1</span>
+            </div>
+            <div class="hw-card-body hw-sensor-body">
+              <div class="acoustic-meter-row">
+                <span style="font-size:11.5px; font-weight:700; color:var(--c-navy);">Acoustic Sensor (GPIO 34)</span>
+                <span class="hw-chip-mono" id="hw-acoustic-val">18.0 dB-idx</span>
+              </div>
+              <div class="acoustic-bar-track">
+                <div class="acoustic-bar-fill" id="hw-acoustic-bar" style="width:18%;"></div>
+              </div>
+              <div class="hw-kv-grid">
+                <div class="hw-kv">
+                  <span class="ins-k">Trigger Threshold</span>
+                  <span class="ins-v">&ge; 85.0 dB-idx</span>
+                </div>
+                <div class="hw-kv">
+                  <span class="ins-k">Wi-Fi Signal (RSSI)</span>
+                  <span class="ins-v" id="hw-rssi-val">— dBm</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- 12-Channel Addressable NeoPixel Zone Strip -->
+        <div class="panel-card">
+          <div class="panel-card-header">
+            <span class="panel-card-title">Addressable WS2812B Zone Ring (GPIO 4 &middot; 12 Zone Addresses)</span>
+            <span class="hw-chip-mono">1 ESP32 Concentrator &rarr; 10 Floors + 2 Gates</span>
+          </div>
+          <div class="hw-led-strip" id="hw-led-strip"></div>
+        </div>
+
+        <!-- Live MQTT Packet Inspector -->
+        <div class="panel-card">
+          <div class="panel-card-header">
+            <span class="panel-card-title">Live MQTT Packet Stream (broker.hivemq.com:1883)</span>
+            <span class="hw-chip-mono" id="hw-last-hb">Heartbeat: waiting…</span>
+          </div>
+          <div class="mqtt-log-list" id="hw-packet-log">
+            <div class="empty-state">Waiting for MQTT packets…</div>
+          </div>
+        </div>
+
+      </div><!-- /tab-hardware -->
+
     </main>
   </div>
 </div>
@@ -396,7 +575,7 @@
         </svg>
         Fast 3-Criteria Video Threat Scanner
       </div>
-      <button class="icon-btn-rail" onclick="closeUploadModal()" style="width:30px; height:30px;">&times;</button>
+      <button id="modal-upload-close" class="icon-btn-rail" onclick="closeUploadModal()" style="width:30px; height:30px;">&times;</button>
     </div>
 
     <!-- Scannable 3-Criteria Gatekeeper Cards -->
@@ -436,7 +615,7 @@
     <div id="modal-scan-result" class="scan-result-box"></div>
 
     <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:4px;">
-      <button class="btn" onclick="closeUploadModal()">Close</button>
+      <button id="modal-upload-cancel" class="btn" onclick="closeUploadModal()">Close</button>
       <button id="modal-upload-submit" class="btn btn-primary" onclick="submitModalVideoUpload()">
         Scan Video Now
       </button>
@@ -472,7 +651,86 @@
   </div>
 </div>
 
+<!-- ══ MODAL 3: PERSONNEL & IT TECHNICIAN AUTHENTICATION ═════════ -->
+<div id="auth-modal" class="modal-backdrop" style="display:none;">
+  <div class="modal-card" style="max-width:440px;">
+    <div class="modal-head">
+      <div class="modal-title">
+        <svg class="icon icon-md" viewBox="0 0 24 24" style="color:var(--c-blue);">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        </svg>
+        Authorized Staff &amp; IT Access
+      </div>
+      <button class="icon-btn-rail" onclick="closeAuthModal()" style="width:30px; height:30px;">&times;</button>
+    </div>
+
+    <!-- Gemini Pill Switcher: Login vs Create Account -->
+    <div class="pill-group" style="width:100%; justify-content:center;">
+      <button id="auth-tab-login" class="filter-pill active" style="flex:1; justify-content:center;" onclick="switchAuthTab('login')">Sign In</button>
+      <button id="auth-tab-register" class="filter-pill" style="flex:1; justify-content:center;" onclick="switchAuthTab('register')">Create Account</button>
+    </div>
+
+    <!-- SIGN IN PANEL -->
+    <div id="auth-panel-login" style="display:flex; flex-direction:column; gap:10px;">
+      <div>
+        <label class="sb-title" style="margin-bottom:5px; display:block;">Username</label>
+        <input id="login-username" type="text" class="text-input" placeholder="e.g. safety.officer or it.tech" />
+      </div>
+      <div>
+        <label class="sb-title" style="margin-bottom:5px; display:block;">Password</label>
+        <input id="login-password" type="password" class="text-input" placeholder="Enter password" onkeydown="if(event.key==='Enter') submitLogin()" />
+      </div>
+      <div class="demo-creds-box">
+        <span style="font-size:10.5px; color:var(--c-muted); font-weight:700;">Quick Fill Capstone Accounts:</span>
+        <div style="display:flex; gap:6px; margin-top:4px;">
+          <button type="button" class="btn" style="height:28px; font-size:11px; flex:1;" onclick="fillDemoCreds('safety.officer', 'Sentinel@2026')">Personnel Officer</button>
+          <button type="button" class="btn" style="height:28px; font-size:11px; flex:1;" onclick="fillDemoCreds('it.tech', 'TechAdmin@2026')">IT Technician</button>
+        </div>
+      </div>
+      <div id="auth-login-error" class="auth-error" style="display:none;"></div>
+      <button id="btn-submit-login" class="btn btn-primary" style="width:100%; height:40px;" onclick="submitLogin()">Sign In to SENTINEL</button>
+    </div>
+
+    <!-- CREATE ACCOUNT PANEL -->
+    <div id="auth-panel-register" style="display:none; flex-direction:column; gap:9px;">
+      <div>
+        <label class="sb-title" style="margin-bottom:4px; display:block;">Full Name</label>
+        <input id="reg-fullname" type="text" class="text-input" placeholder="e.g. Juan Dela Cruz" />
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <div>
+          <label class="sb-title" style="margin-bottom:4px; display:block;">Username</label>
+          <input id="reg-username" type="text" class="text-input" placeholder="min 3 chars" />
+        </div>
+        <div>
+          <label class="sb-title" style="margin-bottom:4px; display:block;">Assigned Role</label>
+          <select id="reg-role" class="input-select" style="height:38px;">
+            <option value="PERSONNEL">School Personnel</option>
+            <option value="IT_TECHNICIAN">IT Technician</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <label class="sb-title" style="margin-bottom:4px; display:block;">Staff Authorization Code</label>
+        <input id="reg-authcode" type="text" class="text-input" placeholder="SNSHS-PERSONNEL-2026 or SNSHS-IT-2026" />
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+        <div>
+          <label class="sb-title" style="margin-bottom:4px; display:block;">Password</label>
+          <input id="reg-password" type="password" class="text-input" placeholder="min 6 chars" />
+        </div>
+        <div>
+          <label class="sb-title" style="margin-bottom:4px; display:block;">Confirm Password</label>
+          <input id="reg-password2" type="password" class="text-input" placeholder="re-enter password" />
+        </div>
+      </div>
+      <div id="auth-reg-error" class="auth-error" style="display:none;"></div>
+      <button id="btn-submit-register" class="btn btn-primary" style="width:100%; height:40px;" onclick="submitRegister()">Create Authorized Account</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast-container"></div>
-<script src="/static/app.js?v=4.0"></script>
+<script src="/static/app.js?v=5.2"></script>
 </body>
 </html>

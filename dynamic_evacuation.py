@@ -206,7 +206,32 @@ def _validate(observations):
                 f'Location {o.location} is outside coverage of {o.device_id}')
 
 
-def assess(observations, manual_blocks=(), closed_edges=(), unavailable_gates=()):
+def _expand_unavailable_nodes(unavailable_nodes):
+    """Expand virtual floor corridor IDs (e.g. TPB-F2-CORRIDOR) into concrete graph nodes.
+
+    Returns (expanded_nodes_set, raw_specs_set).
+    """
+    expanded = set()
+    raw_specs = set(unavailable_nodes or ())
+    for item in raw_specs:
+        if item.endswith('-CORRIDOR'):
+            parts = item.split('-')
+            if len(parts) == 3 and parts[0] in BUILDINGS and parts[1].startswith('F'):
+                b_code = parts[0]
+                f_str = parts[1]
+                rpf = BUILDINGS[b_code][1]
+                # Closing the entire floor corridor closes all its segments and rooms
+                expanded.update(f'{b_code}-{f_str}-C{i}' for i in range(rpf + 1))
+                expanded.update(f'{b_code}-{f_str}-R{r}' for r in range(1, rpf + 1))
+                continue
+        if item not in G:
+            raise ValueError(f'Unknown unavailable node: {item}')
+        expanded.add(item)
+    return expanded, raw_specs
+
+
+def assess(observations, manual_blocks=(), closed_edges=(), unavailable_gates=(),
+           unavailable_nodes=()):
     """Atomic snapshot from the current observation list.
 
     Policy:
@@ -220,6 +245,8 @@ def assess(observations, manual_blocks=(), closed_edges=(), unavailable_gates=()
         Every building can still evacuate towards GATE-W (TPB uses safe STAIR-L).
       - Both gates blocked => Campus lockdown; no confirmed route.
       - WARNING events act as caution zones in this snapshot.
+      - unavailable_nodes represent non-threat personnel closures (Gray X);
+        they remove nodes from egress routing without triggering threat alarms.
     """
     observations = list(observations)
     _validate(observations)
@@ -232,6 +259,8 @@ def assess(observations, manual_blocks=(), closed_edges=(), unavailable_gates=()
     for a, b in closed_edges:
         if not G.has_edge(a, b):
             raise ValueError(f'Unknown edge: {a}, {b}')
+
+    unavail_expanded, unavail_raw = _expand_unavailable_nodes(unavailable_nodes)
 
     blocked = set(manual_blocks) | set(unavailable_gates)
     caution = set()
@@ -292,7 +321,7 @@ def assess(observations, manual_blocks=(), closed_edges=(), unavailable_gates=()
                     blocked.add(f'{b}-F1-STAIR-{side}')
 
     graph = G.copy()
-    graph.remove_nodes_from(blocked | caution)
+    graph.remove_nodes_from(blocked | caution | unavail_expanded)
     for a, b in closed_edges:
         if graph.has_edge(a, b):
             graph.remove_edge(a, b)
@@ -301,6 +330,8 @@ def assess(observations, manual_blocks=(), closed_edges=(), unavailable_gates=()
         'graph': graph,
         'blocked': sorted(blocked),
         'caution': sorted(caution - blocked),
+        'unavailable': sorted(unavail_expanded),
+        'unavailable_raw': sorted(unavail_raw),
         'events': events,
         'observation_count': len(events),
         'raw_detection_count': raw,
@@ -335,6 +366,23 @@ def _floor_is_threatened(node, danger_nodes):
     return False
 
 
+def _room_corridor_unavailable(room, unavailable_set, danger_set):
+    """True when both corridor segments outside the room are closed by non-threat unavailability."""
+    parts = room.split('-')
+    if len(parts) != 3 or not parts[2].startswith('R'):
+        return False
+    b_code, f_str = parts[0], parts[1]
+    try:
+        r_num = int(parts[2][1:])
+    except ValueError:
+        return False
+    c_left = f'{b_code}-{f_str}-C{r_num - 1}'
+    c_right = f'{b_code}-{f_str}-C{r_num}'
+    left_unavail = c_left in unavailable_set and c_left not in danger_set
+    right_unavail = c_right in unavailable_set and c_right not in danger_set
+    return left_unavail and right_unavail
+
+
 def route(room, snapshot, current=None):
     """Return a modeled route for one classroom.
 
@@ -342,6 +390,7 @@ def route(room, snapshot, current=None):
       MODELED_ROUTE_AVAILABLE       -> gate, door, route, cost are set (GREEN)
       HOLD_FOR_AUTHORIZED_GUIDANCE  -> isolated/cut-off from descending (YELLOW)
       NO_CONFIRMED_ROUTE            -> directly threatened room or floor (RED)
+      FACILITY_UNAVAILABLE          -> non-threat maintenance/closed room or corridor (GRAY X)
     """
     if room not in ROOMS:
         raise ValueError(f'Unknown classroom: {room}')
@@ -351,9 +400,21 @@ def route(room, snapshot, current=None):
         raise ValueError(f'Unknown current node: {start}')
 
     danger = set(snapshot.get('blocked', [])) | set(snapshot.get('caution', []))
+    unavailable = set(snapshot.get('unavailable', []))
     floor_threatened = _floor_is_threatened(start, danger)
 
-    # If the origin node itself is removed (threat or blocked node)
+    # Non-threat personnel unavailability takes precedence unless room itself is in active danger
+    if start in unavailable and start not in danger:
+        return {'room': room, 'status': 'FACILITY_UNAVAILABLE',
+                'gate': None, 'door': None, 'route': None, 'cost': None,
+                'reason': 'Marked unavailable by facility personnel (maintenance/closed).'}
+
+    if _room_corridor_unavailable(room, unavailable, danger) and start not in danger:
+        return {'room': room, 'status': 'FACILITY_UNAVAILABLE',
+                'gate': None, 'door': None, 'route': None, 'cost': None,
+                'reason': 'Adjacent corridor is unavailable; room automatically marked out of service.'}
+
+    # If the origin node itself is removed (active threat)
     if start not in graph:
         return {'room': room, 'status': 'NO_CONFIRMED_ROUTE',
                 'gate': None, 'door': None, 'route': None, 'cost': None,
@@ -380,6 +441,10 @@ def route(room, snapshot, current=None):
             return {'room': room, 'status': 'NO_CONFIRMED_ROUTE',
                     'gate': None, 'door': None, 'route': None, 'cost': None,
                     'reason': 'Floor corridor or stairs blocked by active threat.'}
+        elif unavailable:
+            return {'room': room, 'status': 'HOLD_FOR_AUTHORIZED_GUIDANCE',
+                    'gate': None, 'door': None, 'route': None, 'cost': None,
+                    'reason': 'Egress path blocked by closed corridor or stairwell; hold for personnel guidance.'}
         else:
             return {'room': room, 'status': 'HOLD_FOR_AUTHORIZED_GUIDANCE',
                     'gate': None, 'door': None, 'route': None, 'cost': None,
@@ -415,14 +480,16 @@ def format_route(result):
 
 
 def route_summary_counts(snapshot):
-    """Convenience: {'available': n, 'hold': n, 'no_route': n}."""
-    counts = {'available': 0, 'hold': 0, 'no_route': 0}
+    """Convenience: {'available': n, 'hold': n, 'no_route': n, 'unavailable': n}."""
+    counts = {'available': 0, 'hold': 0, 'no_route': 0, 'unavailable': 0}
     for r in ROOMS:
         s = route(r, snapshot)['status']
         if s == 'MODELED_ROUTE_AVAILABLE':
             counts['available'] += 1
         elif s == 'HOLD_FOR_AUTHORIZED_GUIDANCE':
             counts['hold'] += 1
+        elif s == 'FACILITY_UNAVAILABLE':
+            counts['unavailable'] += 1
         else:
             counts['no_route'] += 1
     return counts

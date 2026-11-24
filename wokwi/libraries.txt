@@ -1,0 +1,5 @@
+PubSubClient
+ArduinoJson
+Adafruit NeoPixel
+Adafruit SSD1306
+Adafruit GFX Library

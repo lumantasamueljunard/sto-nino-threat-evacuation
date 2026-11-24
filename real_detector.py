@@ -212,9 +212,9 @@ def _compute_live_scores(frames_analyzed, frames_with_person, frames_with_threat
     return round(obj_score, 2), round(pose_score, 2)
 
 
-def analyze_video_feed(video_path, device_id, incident_id=None, sample_frames=6, progress_callback=None):
+def analyze_video_feed(video_path, device_id, incident_id=None, sample_frames=10, progress_callback=None):
     """Fast 3-Criteria video scanner with singleton YOLOv8 models, direct frame seeking,
-    and early-exit verification once the 3 threat criteria are conclusively met.
+    multi-person pose detection, and early-exit verification for CRITICAL threats.
     """
     import cv2
 
@@ -253,8 +253,8 @@ def analyze_video_feed(video_path, device_id, incident_id=None, sample_frames=6,
         if progress_callback:
             progress_callback(frames_analyzed, target_count)
 
-        # 2. Fast Object Detection (imgsz=320 cuts CPU tensor latency by ~70%)
-        res_obj = model_obj(frame, imgsz=320, verbose=False)[0]
+        # 2. Object Detection at imgsz=480 for reliable small weapon detection
+        res_obj = model_obj(frame, imgsz=480, verbose=False)[0]
         has_person_in_frame = False
         has_threat_in_frame = False
 
@@ -268,26 +268,31 @@ def analyze_video_feed(video_path, device_id, incident_id=None, sample_frames=6,
 
         if has_person_in_frame:
             frames_with_person += 1
-            # 3. Pose Estimation (only when person is present)
-            res_pose = model_pose(frame, imgsz=320, verbose=False)[0]
+            # 3. Multi-person Pose Estimation (checks every person in frame)
+            res_pose = model_pose(frame, imgsz=480, verbose=False)[0]
             if res_pose.keypoints is not None and len(res_pose.keypoints) > 0:
-                kpts = res_pose.keypoints.data[0].cpu().numpy()
-                if len(kpts) > 10:
-                    ls_y, rs_y = kpts[5][1], kpts[6][1]
-                    lw_y, rw_y = kpts[9][1], kpts[10][1]
-                    if (lw_y < ls_y and kpts[9][2] > 0.3) or (rw_y < rs_y and kpts[10][2] > 0.3):
-                        frames_raised_arms += 1
+                person_raised = False
+                for person_kpts in res_pose.keypoints.data:
+                    kpts = person_kpts.cpu().numpy()
+                    if len(kpts) > 10:
+                        ls_y, rs_y = kpts[5][1], kpts[6][1]
+                        lw_y, rw_y = kpts[9][1], kpts[10][1]
+                        if (lw_y < ls_y and kpts[9][2] > 0.3) or (rw_y < rs_y and kpts[10][2] > 0.3):
+                            person_raised = True
+                            break
+                if person_raised:
+                    frames_raised_arms += 1
 
         if has_threat_in_frame:
             frames_with_threat_item += 1
 
-        # 4. 3-Criteria Early-Exit Gatekeeper (after at least 2 keyframes when threat verified)
-        if frames_analyzed >= 2 and frames_with_threat_item > 0:
+        # 4. 3-Criteria Early-Exit Gatekeeper (after >= 3 keyframes on confirmed CRITICAL)
+        if frames_analyzed >= 3 and frames_with_threat_item > 0:
             live_obj, live_pose = _compute_live_scores(
                 frames_analyzed, frames_with_person, frames_with_threat_item, frames_raised_arms
             )
             live_clf = classify_threat(acoustic_score, live_pose, live_obj)
-            if live_clf.get("verified"):
+            if live_clf.get("verified") and live_clf.get("level") == "CRITICAL":
                 early_exit_triggered = True
                 break
 

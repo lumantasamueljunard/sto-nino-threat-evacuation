@@ -12,8 +12,16 @@ let appState = {
   devices: {},
   detections: [],
   scenarios: [],
+  hardware: null,
+  incidents: [],
+  user: null,
+  token: localStorage.getItem('sentinel_token') || null,
+  locBldg: '',
+  locFloor: '',
+  locRoom: '',
   unavailableGates: [],
   manualBlocks: [],
+  unavailableNodes: [],
   activeTab: 'map',
   mapView: 'campus',
   camFilter: 'outside',
@@ -50,20 +58,59 @@ const CANONICAL_DEVICES = [
 
 // ── Bootstrapping ──────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
+  await checkAuthSession();
   await loadInitialMeta();
+  applyUrlFloorPin();
   await refresh();
   setInterval(refresh, 4000);
 });
 
+function applyUrlFloorPin() {
+  const params = new URLSearchParams(window.location.search);
+  const fParam = (params.get('floor') || '').trim().toUpperCase();
+  const m = fParam.match(/^(TPB|AB|LB)-F(\d+)$/);
+  if (!m) return;
+  const bldg = m[1];
+  const fl = m[2];
+  const bSel = document.getElementById('loc-bldg');
+  if (bSel) {
+    bSel.value = bldg;
+    onLocatorBuildingChange();
+    const fSel = document.getElementById('loc-floor');
+    if (fSel) {
+      fSel.value = fl;
+      onLocatorFloorChange();
+    }
+  }
+}
+
 function toggleSidebar() {
+  if (!appState.user) return;
   const sb = document.getElementById('app-sidebar');
   if (sb) sb.classList.toggle('collapsed');
 }
 
-// ── API Fetch Helper ───────────────────────────────────────
+// ── API Fetch Helper (with Bearer Auth) ────────────────────
+function authHeaders(extra = {}) {
+  const hdrs = { ...extra };
+  if (appState.token) hdrs['Authorization'] = `Bearer ${appState.token}`;
+  return hdrs;
+}
+
 async function apiFetch(path, opts = {}) {
   try {
-    const res = await fetch(API + path, opts);
+    const mergedOpts = {
+      ...opts,
+      headers: authHeaders(opts.headers || {}),
+    };
+    const res = await fetch(API + path, mergedOpts);
+    if (res.status === 401 && appState.token) {
+      // Session expired
+      appState.token = null;
+      appState.user = null;
+      localStorage.removeItem('sentinel_token');
+      applyAuthUI();
+    }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (e) {
@@ -85,13 +132,16 @@ function toast(msg, type = 'info') {
   }, 3400);
 }
 
-// ── Initial Metadata Load ──────────────────────────────────
+// ── Initial Metadata Load (Role-Aware) ─────────────────────
 async function loadInitialMeta() {
-  const [roomsData, devData, scenData] = await Promise.all([
+  const isStaff = !!appState.user;
+  const calls = [
     apiFetch('/api/rooms'),
     apiFetch('/api/devices'),
-    apiFetch('/api/scenarios'),
-  ]);
+  ];
+  if (isStaff) calls.push(apiFetch('/api/scenarios'));
+
+  const [roomsData, devData, scenData] = await Promise.all(calls);
 
   if (roomsData?.rooms) {
     appState.rooms = roomsData.rooms;
@@ -108,19 +158,38 @@ async function loadInitialMeta() {
 }
 
 async function refresh() {
-  const [status, snapshot, detData] = await Promise.all([
+  const isStaff = !!appState.user;
+  const isIT = appState.user?.role === 'IT_TECHNICIAN';
+
+  const calls = [
     apiFetch('/api/status'),
     apiFetch('/api/snapshot'),
-    apiFetch('/api/detections'),
-  ]);
+  ];
+  if (isStaff) {
+    calls.push(apiFetch('/api/detections'));
+    calls.push(apiFetch('/api/db/incidents'));
+  }
+  if (isIT) {
+    calls.push(apiFetch('/api/hardware/status'));
+  }
+
+  const results = await Promise.all(calls);
+  const status = results[0];
+  const snapshot = results[1];
+  const detData = isStaff ? results[2] : null;
+  const incData = isStaff ? results[3] : null;
+  const hwData = isIT ? results[isStaff ? 4 : 2] : null;
 
   if (status) {
     appState.status = status;
     appState.unavailableGates = status.unavailable_gates || [];
     appState.manualBlocks = status.manual_blocks || [];
+    appState.unavailableNodes = status.unavailable_nodes || [];
   }
   if (snapshot) appState.snapshot = snapshot;
   if (detData) appState.detections = detData.detections || [];
+  if (incData?.incidents) appState.incidents = incData.incidents;
+  if (hwData) appState.hardware = hwData;
 
   renderAll();
 }
@@ -152,7 +221,7 @@ function populateRoomDropdowns(rooms) {
   };
 
   let html = '<option value="">Select classroom (36 rooms)…</option>';
-  let blockHtml = '<option value="">+ Block Classroom…</option>';
+  let blockHtml = '<option value="">+ Unavailable Classroom…</option>';
 
   for (const [grp, list] of Object.entries(groups)) {
     html += `<optgroup label="${grp}">${list.map(r => `<option value="${r}">${r}</option>`).join('')}</optgroup>`;
@@ -172,10 +241,11 @@ function populateHazardDropdowns() {
   ];
 
   if (corrSel) {
-    let html = '<option value="">+ Block Corridor…</option>';
+    let html = '<option value="">+ Unavailable Corridor…</option>';
     bldgs.forEach(b => {
       let opts = '';
       for (let f = 1; f <= b.floors; f++) {
+        opts += `<option value="${b.code}-F${f}-CORRIDOR">${b.code}-F${f}-CORRIDOR (Entire Floor ${f} — All Rooms)</option>`;
         for (let c = 0; c <= b.rpf; c++) {
           const id = `${b.code}-F${f}-C${c}`;
           opts += `<option value="${id}">${id} (Floor ${f} Seg ${c})</option>`;
@@ -187,7 +257,7 @@ function populateHazardDropdowns() {
   }
 
   if (stairSel) {
-    let html = '<option value="">+ Block Stairwell…</option>';
+    let html = '<option value="">+ Unavailable Stairwell…</option>';
     bldgs.forEach(b => {
       let opts = '';
       for (let f = 1; f <= b.floors; f++) {
@@ -212,6 +282,8 @@ function renderAll() {
 
   const selectedRoom = document.getElementById('sb-room-select')?.value;
   if (selectedRoom) updateRoomInspectorCard(selectedRoom);
+  updatePublicThreatBar(snapshot);
+  updateOccupantGuidance();
 
   if (appState.mapView === 'campus') {
     renderCampusMap(snapshot, status);
@@ -222,6 +294,7 @@ function renderAll() {
   updateRoomsTable(snapshot);
   updateEventLog(snapshot);
   renderCamGrid();
+  renderHardwareTwin();
 }
 
 // ── Topbar & Emergency Banner ──────────────────────────────
@@ -246,7 +319,10 @@ function updateTopbarStatus(status, snapshot) {
     banner.className = 'emergency-banner visible';
     ebBeacon.className = 'status-beacon critical';
     ebTitle.textContent = 'CRITICAL THREAT ACTIVE';
-    ebSub.textContent = `${snapshot.counts?.['MODELED_ROUTE_AVAILABLE'] ?? 0} rooms evacuating · ${snapshot.counts?.['HOLD_FOR_AUTHORIZED_GUIDANCE'] ?? 0} holding · ${snapshot.counts?.['NO_CONFIRMED_ROUTE'] ?? 0} compromised.`;
+    const safeCnt = snapshot.counts?.available ?? snapshot.counts?.['MODELED_ROUTE_AVAILABLE'] ?? 0;
+    const holdCnt = snapshot.counts?.hold ?? snapshot.counts?.['HOLD_FOR_AUTHORIZED_GUIDANCE'] ?? 0;
+    const blkCnt  = snapshot.counts?.no_route ?? snapshot.counts?.['NO_CONFIRMED_ROUTE'] ?? 0;
+    ebSub.textContent = `${safeCnt} rooms evacuating · ${holdCnt} holding · ${blkCnt} compromised.`;
   } else if (lvl === 'WARNING') {
     pill.classList.add('warning');
     beacon.classList.add('warning');
@@ -286,18 +362,18 @@ function updateSidebarControls(status) {
     stNE.textContent = neBlocked ? 'BLOCKED' : 'OPEN';
   }
 
-  const tagsEl = document.getElementById('block-tags');
-  const clearBtn = document.getElementById('btn-clear-blocks');
+  const tagsEl = document.getElementById('facility-tags');
+  const clearBtn = document.getElementById('btn-clear-facilities');
   if (tagsEl) {
-    tagsEl.innerHTML = appState.manualBlocks.map(node => `
-      <span class="tag-chip">
-        ${node}
-        <button onclick="removeBlock('${node}')" title="Unblock">&times;</button>
+    tagsEl.innerHTML = (appState.unavailableNodes || []).map(node => `
+      <span class="tag-chip unavail">
+        [X] ${node}
+        <button onclick="removeUnavailableFacility('${node}')" title="Re-open Facility">&times;</button>
       </span>
     `).join('');
   }
   if (clearBtn) {
-    clearBtn.style.display = appState.manualBlocks.length ? 'inline-block' : 'none';
+    clearBtn.style.display = appState.unavailableNodes?.length ? 'inline-block' : 'none';
   }
 }
 
@@ -365,15 +441,26 @@ function updateRoomInspectorCard(roomId) {
   card.style.display = 'block';
   const isSafe = r.status === 'MODELED_ROUTE_AVAILABLE';
   const isHold = r.status === 'HOLD_FOR_AUTHORIZED_GUIDANCE';
+  const isUnavail = r.status === 'FACILITY_UNAVAILABLE';
 
-  card.className = `inspector-card ${isSafe ? '' : isHold ? 'warning' : 'critical'}`;
-  setText('ins-status-label', isSafe ? 'SAFE EVACUATION ROUTE' : isHold ? 'HOLD IN PLACE (ISOLATED)' : 'THREAT AREA / BLOCKED');
+  card.className = `inspector-card ${isSafe ? '' : isUnavail ? 'unavail' : isHold ? 'warning' : 'critical'}`;
+  setText(
+    'ins-status-label',
+    isSafe ? 'SAFE EVACUATION ROUTE'
+      : isUnavail ? 'FACILITY UNAVAILABLE (GRAY X)'
+      : isHold ? 'HOLD IN PLACE (ISOLATED)'
+      : 'THREAT AREA / BLOCKED'
+  );
   setText('ins-gate', r.gate || 'NONE');
   setText('ins-door', r.door_label || 'NONE');
   setText('ins-steps', r.route?.length ? `${r.route.length} graph nodes (Cost ${r.cost})` : (r.reason || 'No route available'));
 }
 
 async function toggleGate(gateId) {
+  if (!appState.user) {
+    toast('Sign in as School Personnel or IT Technician to toggle perimeter gates.', 'warning');
+    return;
+  }
   const list = [...appState.unavailableGates];
   const idx = list.indexOf(gateId);
   if (idx >= 0) list.splice(idx, 1);
@@ -388,38 +475,41 @@ async function toggleGate(gateId) {
   await refresh();
 }
 
-async function addBlock(selectEl) {
+async function addUnavailableFacility(selectEl) {
   const node = selectEl.value;
   selectEl.value = '';
-  if (!node || appState.manualBlocks.includes(node)) return;
+  if (!node || appState.unavailableNodes.includes(node)) return;
 
-  const next = [...appState.manualBlocks, node];
-  await apiFetch('/api/blocks', {
+  const next = [...appState.unavailableNodes, node];
+  const res = await apiFetch('/api/facility-overrides', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ manual_blocks: next }),
+    body: JSON.stringify({ unavailable_nodes: next, assigned_by: 'PERSONNEL' }),
   });
-  toast(`Blocked node: ${node}`, 'warning');
+  if (res?.ok) {
+    toast(`Marked ${node} unavailable (Gray X · Non-Threat)`, 'info');
+    await refresh();
+  }
+}
+
+async function removeUnavailableFacility(node) {
+  const next = appState.unavailableNodes.filter(n => n !== node);
+  await apiFetch('/api/facility-overrides', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ unavailable_nodes: next, assigned_by: 'PERSONNEL' }),
+  });
+  toast(`Re-opened ${node}`, 'success');
   await refresh();
 }
 
-async function removeBlock(node) {
-  const next = appState.manualBlocks.filter(n => n !== node);
-  await apiFetch('/api/blocks', {
+async function clearFacilities() {
+  await apiFetch('/api/facility-overrides', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ manual_blocks: next }),
+    body: JSON.stringify({ unavailable_nodes: [], assigned_by: 'PERSONNEL' }),
   });
-  await refresh();
-}
-
-async function clearBlocks() {
-  await apiFetch('/api/blocks', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ manual_blocks: [] }),
-  });
-  toast('Manual overrides cleared', 'info');
+  toast('All facilities re-opened', 'success');
   await refresh();
 }
 
@@ -431,6 +521,21 @@ async function resetAll() {
   if (insCard) insCard.style.display = 'none';
   toast('Campus reset to Normal All-Clear state', 'success');
   await refresh();
+}
+
+async function resolveEmergency() {
+  const res = await apiFetch('/api/incidents/resolve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      notes: 'Threat apprehended and evacuation secured by authorized personnel.',
+      resolved_by: 'DRRM_OFFICER',
+    }),
+  });
+  if (res?.ok) {
+    toast('Campus SECURED — Active incidents logged as RESOLVED & ESP32 stood down.', 'success');
+    await refresh();
+  }
 }
 
 // ── Shorten Final Segment of SVG Path so Arrowhead Never Overlaps Gate Circle ──
@@ -495,11 +600,14 @@ function renderCampusMap(snapshot, status) {
   bldConfigs.forEach(b => {
     const bRoutes = Object.entries(snapshot.routes || {}).filter(([rm]) => rm.startsWith(`${b.code}-`));
     const safeRoutes = bRoutes.filter(([_, r]) => r.status === 'MODELED_ROUTE_AVAILABLE');
+    const unavailRoutes = bRoutes.filter(([_, r]) => r.status === 'FACILITY_UNAVAILABLE');
     const holdRoutes = bRoutes.filter(([_, r]) => r.status === 'HOLD_FOR_AUTHORIZED_GUIDANCE');
     const critRoutes = bRoutes.filter(([_, r]) => r.status === 'NO_CONFIRMED_ROUTE');
 
     let bCol = '#059669';
-    let bStatusText = `${bRoutes.length}/${bRoutes.length} CLEAR`;
+    let bStatusText = unavailRoutes.length
+      ? `${safeRoutes.length} CLEAR · ${unavailRoutes.length} CLOSED`
+      : `${bRoutes.length}/${bRoutes.length} CLEAR`;
     if (isEmergency) {
       if (critRoutes.length > 0) {
         bCol = '#dc2626';
@@ -511,6 +619,8 @@ function renderCampusMap(snapshot, status) {
         bCol = '#059669';
         bStatusText = `ALL ${safeRoutes.length} EVACUATING`;
       }
+    } else if (unavailRoutes.length === bRoutes.length && bRoutes.length > 0) {
+      bCol = '#64748b';
     }
 
     // Draw Evacuation Flow Arrow when Emergency/Warning or Gate Override is active
@@ -617,12 +727,42 @@ function renderBuildingFloors(bKey, snapshot) {
 
   let anyBlocked = false;
   let anyCritical = false;
-  const selectedRoomId = document.getElementById('sb-room-select')?.value || '';
+  const selectedRoomId = appState.locRoom || document.getElementById('sb-room-select')?.value || '';
+  const focusedFloorKey = (appState.locBldg && appState.locFloor) ? `${appState.locBldg}-F${appState.locFloor}` : '';
+  const isSingleFloorDisplay = focusedFloorKey.startsWith(`${bCode}-`);
+  grid.className = `floor-grid ${isSingleFloorDisplay ? 'single-floor-focus' : ''}`;
   const isEmergency = snapshot?.global_status === 'CRITICAL' || snapshot?.global_status === 'WARNING';
+  const unavailSet = new Set(snapshot?.unavailable || []);
+  const unavailRawSet = new Set(snapshot?.unavailable_raw || []);
+
+  // Helper: Draw Gray Overlay with Crisp Bold SVG 'X' and Label Pill
+  function renderGrayX(x, y, w, h, tagText, pillW = 88) {
+    const pad = Math.min(18, Math.max(8, Math.min(w, h) * 0.16));
+    const cx = x + w / 2;
+    const cy = y + h / 2;
+    return `
+      <g>
+        <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="5"
+          fill="rgba(71, 85, 105, 0.58)" stroke="#94a3b8" stroke-width="2"/>
+        <line x1="${x + pad}" y1="${y + pad}" x2="${x + w - pad}" y2="${y + h - pad}"
+          stroke="#0f172a" stroke-width="8" stroke-linecap="round" opacity="0.6"/>
+        <line x1="${x + w - pad}" y1="${y + pad}" x2="${x + pad}" y2="${y + h - pad}"
+          stroke="#0f172a" stroke-width="8" stroke-linecap="round" opacity="0.6"/>
+        <line x1="${x + pad}" y1="${y + pad}" x2="${x + w - pad}" y2="${y + h - pad}"
+          stroke="#e2e8f0" stroke-width="4.5" stroke-linecap="round"/>
+        <line x1="${x + w - pad}" y1="${y + pad}" x2="${x + pad}" y2="${y + h - pad}"
+          stroke="#e2e8f0" stroke-width="4.5" stroke-linecap="round"/>
+        <rect x="${cx - pillW / 2}" y="${cy - 10}" width="${pillW}" height="20" rx="4" fill="#0f172a" opacity="0.95"/>
+        <text x="${cx}" y="${cy + 3.5}" text-anchor="middle" fill="#cbd5e1"
+          font-size="9.5" font-weight="800" font-family="'JetBrains Mono', monospace">${tagText}</text>
+      </g>
+    `;
+  }
 
   grid.innerHTML = '';
   for (let f = 1; f <= floors; f++) {
     const pCode = `${bCode}-F${f}`;
+    if (isSingleFloorDisplay && pCode !== focusedFloorKey) continue;
     const imgW = 1024;
 
     const badgeW = 136;
@@ -642,10 +782,42 @@ function renderBuildingFloors(bKey, snapshot) {
     const colRight = detRight?.classification?.level === 'CRITICAL' ? '#dc2626' : detRight?.classification?.level === 'WARNING' ? '#d97706' : '#10b981';
 
     let roomOverlays = '';
+    let facilityOverlays = '';
     let arrows = '';
     let floorSafe = true;
     let floorCritical = false;
 
+    const firstBox = roomBoxes[bCode]?.[1];
+    const lastBox = roomBoxes[bCode]?.[roomsPerFloor];
+    const corrY = firstBox?.corrY || 356;
+
+    // 1. Check Unavailable Stairwells & Corridors (Always visible as Gray X)
+    if (unavailSet.has(`${pCode}-STAIR-L`)) {
+      facilityOverlays += renderGrayX(74, 58, 66, firstBox.h, 'STAIR L · X', 84);
+    }
+    if (unavailSet.has(`${pCode}-STAIR-R`)) {
+      facilityOverlays += renderGrayX(872, 58, 66, firstBox.h, 'STAIR R · X', 84);
+    }
+
+    const wholeCorrUnavail = unavailRawSet.has(`${pCode}-CORRIDOR`);
+    if (wholeCorrUnavail) {
+      facilityOverlays += renderGrayX(firstBox.x, corrY - 16, (lastBox.x + lastBox.w) - firstBox.x, 32, `${pCode} CORRIDOR UNAVAIL`, 170);
+    } else {
+      for (let c = 0; c <= roomsPerFloor; c++) {
+        if (unavailSet.has(`${pCode}-C${c}`)) {
+          const sx = c === 0
+            ? 140
+            : c === roomsPerFloor
+              ? (lastBox.x + lastBox.w - 30)
+              : (roomBoxes[bCode][c].x + roomBoxes[bCode][c].w - 42);
+          const sw = (c === 0 || c === roomsPerFloor) ? 74 : 84;
+          facilityOverlays += renderGrayX(sx, corrY - 15, sw, 30, `C${c} · X`, 64);
+        }
+      }
+    }
+
+    // 2. Render Each Classroom Box & Diverting Arrows
+    const showDetourArrows = isEmergency || unavailSet.size > 0;
     for (let r = 1; r <= roomsPerFloor; r++) {
       const rmId = `${pCode}-R${r}`;
       const rm = snapshot?.routes?.[rmId];
@@ -655,7 +827,12 @@ function renderBuildingFloors(bKey, snapshot) {
       const rmStatus = rm?.status || 'MODELED_ROUTE_AVAILABLE';
       const isSelected = rmId === selectedRoomId;
 
-      if (isEmergency || isSelected) {
+      if (rmStatus === 'FACILITY_UNAVAILABLE') {
+        roomOverlays += renderGrayX(box.x, box.y, box.w, box.h, `R${r} · UNAVAIL`, 92);
+        continue;
+      }
+
+      if (showDetourArrows || isSelected) {
         let fillCol, strokeCol, tagText, tagCol;
         if (rmStatus === 'MODELED_ROUTE_AVAILABLE') {
           fillCol = isSelected ? 'rgba(5, 150, 105, 0.34)' : 'rgba(5, 150, 105, 0.20)';
@@ -678,7 +855,7 @@ function renderBuildingFloors(bKey, snapshot) {
         }
 
         roomOverlays += `
-          <g id="box-${rmId}">
+          <g id="box-${rmId}" style="cursor:pointer; pointer-events:all;" onclick="inspectRoomFromBlueprint('${rmId}')">
             <rect x="${box.x}" y="${box.y}" width="${box.w}" height="${box.h}" rx="5"
               fill="${fillCol}" stroke="${strokeCol}" stroke-width="${isSelected ? 3.5 : 2}"/>
             <rect x="${box.x + 8}" y="${box.y + 8}" width="72" height="20" rx="4" fill="#0f172a" opacity="0.92"/>
@@ -688,7 +865,6 @@ function renderBuildingFloors(bKey, snapshot) {
         `;
 
         if (rmStatus === 'MODELED_ROUTE_AVAILABLE') {
-          // Determine actual stairwell from route nodes (fixes fallback direction bug)
           const useLeft = rm?.route?.some(n => n.includes('STAIR-L'))
             ? true
             : rm?.route?.some(n => n.includes('STAIR-R'))
@@ -699,7 +875,6 @@ function renderBuildingFloors(bKey, snapshot) {
           const doorX = rm?.door?.endsWith('-DL') ? box.dlX : rm?.door?.endsWith('-DR') ? box.drX : (useLeft ? box.dlX : box.drX);
           const startX = box.x + (box.w / 2);
           const startY = box.y + (box.h * 0.52);
-          // Slight corridor lane offset so arrows from adjacent rooms never collide or clip
           const laneOffset = Math.round((r - (roomsPerFloor + 1) / 2) * 3.5);
           const laneY = box.corrY + laneOffset;
 
@@ -715,9 +890,10 @@ function renderBuildingFloors(bKey, snapshot) {
         }
       } else {
         roomOverlays += `
-          <g id="box-${rmId}">
+          <g id="box-${rmId}" style="cursor:pointer; pointer-events:all;" onclick="inspectRoomFromBlueprint('${rmId}')">
             <rect x="${box.x}" y="${box.y}" width="${box.w}" height="${box.h}" rx="4"
-              fill="rgba(255, 255, 255, 0.03)" stroke="rgba(148, 163, 184, 0.25)" stroke-width="1"/>
+              fill="${isSelected ? 'rgba(11, 87, 208, 0.20)' : 'rgba(255, 255, 255, 0.03)'}"
+              stroke="${isSelected ? '#3b82f6' : 'rgba(148, 163, 184, 0.25)'}" stroke-width="${isSelected ? 3 : 1}"/>
             <rect x="${box.x + 8}" y="${box.y + 8}" width="46" height="18" rx="4" fill="#0f172a" opacity="0.8"/>
             <text x="${box.x + 31}" y="${box.y + 21}" text-anchor="middle" fill="#cbd5e1"
               font-size="10" font-weight="700" font-family="'JetBrains Mono', monospace">R${r}</text>
@@ -730,15 +906,18 @@ function renderBuildingFloors(bKey, snapshot) {
     if (!floorSafe) anyBlocked = true;
 
     const badgeClass = floorCritical ? 'critical' : !floorSafe ? 'warning' : 'safe';
-    const badgeText  = !isEmergency ? 'Clear' : floorCritical ? 'Threat' : !floorSafe ? 'Hold' : 'Evacuating';
+    const badgeText  = !isEmergency ? (unavailSet.size ? 'Detour Active' : 'Clear') : floorCritical ? 'Threat' : !floorSafe ? 'Hold' : 'Evacuating';
 
+    const isFocusedFloor = pCode === focusedFloorKey;
     const card = document.createElement('div');
-    card.className = 'floor-card';
+    card.id = `floor-card-${pCode}`;
+    card.className = `floor-card ${isFocusedFloor ? 'focused-floor' : ''}`;
     card.innerHTML = `
       <div class="floor-card-header">
         <div>
           <span class="floor-card-title">Floor ${f}</span>
           <span class="floor-card-code"> &middot; ${pCode}</span>
+          ${isFocusedFloor ? '<span class="brand-tag" style="margin-left:6px;">YOUR LOCATION</span>' : ''}
         </div>
         <span class="badge ${badgeClass}">
           <span class="status-beacon ${badgeClass === 'safe' ? '' : badgeClass}" style="width:6px; height:6px;"></span>
@@ -754,6 +933,7 @@ function renderBuildingFloors(bKey, snapshot) {
             </marker>
           </defs>
           ${roomOverlays}
+          ${facilityOverlays}
           ${arrows}
           <g>
             <rect x="${camLeftX}" y="${camLeftY}" width="${badgeW}" height="${badgeH}" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
@@ -817,9 +997,10 @@ function updateBuildingBadges(snapshot) {
 // ── KPI Metrics ────────────────────────────────────────────
 function updateMetrics(snap) {
   const counts = snap.counts || {};
-  setText('m-safe',    counts['MODELED_ROUTE_AVAILABLE'] ?? '36');
-  setText('m-hold',    counts['HOLD_FOR_AUTHORIZED_GUIDANCE'] ?? '0');
-  setText('m-blocked', counts['NO_CONFIRMED_ROUTE'] ?? '0');
+  setText('m-safe',    counts.available ?? counts['MODELED_ROUTE_AVAILABLE'] ?? '36');
+  setText('m-unavail', counts.unavailable ?? 0);
+  setText('m-hold',    counts.hold ?? counts['HOLD_FOR_AUTHORIZED_GUIDANCE'] ?? '0');
+  setText('m-blocked', counts.no_route ?? counts['NO_CONFIRMED_ROUTE'] ?? '0');
 }
 
 // ── Classroom Table & Event Log ────────────────────────────
@@ -830,17 +1011,18 @@ function updateRoomsTable(snap) {
   const routes = snap.routes || {};
   tbody.innerHTML = Object.entries(routes).map(([rm, r]) => {
     const isSafe = r.status === 'MODELED_ROUTE_AVAILABLE';
+    const isUnavail = r.status === 'FACILITY_UNAVAILABLE';
     const isHold = r.status === 'HOLD_FOR_AUTHORIZED_GUIDANCE';
-    const rowClass = isSafe ? 'row-safe' : isHold ? 'row-hold' : 'row-threat';
-    const statusClass = isSafe ? 'safe' : isHold ? 'warning' : 'critical';
-    const statusLabel = isSafe ? 'Safe Egress' : isHold ? 'Hold in Place' : 'Threat / Blocked';
+    const rowClass = isSafe ? 'row-safe' : isUnavail ? 'row-unavail' : isHold ? 'row-hold' : 'row-threat';
+    const statusClass = isSafe ? 'safe' : isUnavail ? 'unavail' : isHold ? 'warning' : 'critical';
+    const statusLabel = isSafe ? 'Safe Egress' : isUnavail ? 'Unavailable (X)' : isHold ? 'Hold in Place' : 'Threat / Blocked';
 
     return `<tr class="${rowClass}">
       <td><span class="room-code">${rm}</span></td>
-      <td><span class="badge ${statusClass}"><span class="status-beacon ${statusClass === 'safe' ? '' : statusClass}" style="width:6px;height:6px;"></span>${statusLabel}</span></td>
+      <td><span class="badge ${statusClass}"><span class="status-beacon ${statusClass === 'safe' || statusClass === 'unavail' ? '' : statusClass}" style="width:6px;height:6px;"></span>${statusLabel}</span></td>
       <td><span class="gate-code">${r.gate || '—'}</span></td>
       <td>${r.door_label || '—'}</td>
-      <td>${r.route?.length ? r.route.length + ' nodes' : 'Blocked'}</td>
+      <td>${r.route?.length ? r.route.length + ' nodes' : (isUnavail ? 'Closed' : 'Blocked')}</td>
     </tr>`;
   }).join('');
 
@@ -854,25 +1036,47 @@ function updateRoomsTable(snap) {
 
 function updateEventLog(snap) {
   const el = document.getElementById('event-log');
-  if (!el) return;
-  const events = snap.events || [];
-  if (!events.length) {
-    el.innerHTML = '<div class="empty-state">No active incidents recorded. Campus secure.</div>';
-    return;
+  if (el) {
+    const events = snap.events || [];
+    if (!events.length) {
+      el.innerHTML = '<div class="empty-state">No active incidents recorded. Campus secure.</div>';
+    } else {
+      el.innerHTML = `<div class="event-list">${events.map(ev => {
+        const lvl = (ev.level || 'NORMAL').toLowerCase();
+        const loc = Array.isArray(ev.location) ? ev.location.join(', ') : (ev.location || '');
+        return `
+          <div class="event-item ${lvl}">
+            <span class="status-beacon ${lvl === 'normal' ? '' : lvl}" style="margin-top:4px;"></span>
+            <div>
+              <div style="font-weight:800; color:var(--c-navy);">${ev.device_id} &middot; ${ev.level}</div>
+              <div style="color:var(--c-muted); font-size:11px;">Event <code>${ev.event_id}</code> ${loc ? `&middot; Zone: ${loc}` : ''}</div>
+            </div>
+          </div>
+        `;
+      }).join('')}</div>`;
+    }
   }
-  el.innerHTML = `<div class="event-list">${events.map(ev => {
-    const lvl = (ev.level || 'NORMAL').toLowerCase();
-    const loc = Array.isArray(ev.location) ? ev.location.join(', ') : (ev.location || '');
-    return `
-      <div class="event-item ${lvl}">
-        <span class="status-beacon ${lvl === 'normal' ? '' : lvl}" style="margin-top:4px;"></span>
-        <div>
-          <div style="font-weight:800; color:var(--c-navy);">${ev.device_id} &middot; ${ev.level}</div>
-          <div style="color:var(--c-muted); font-size:11px;">Event <code>${ev.event_id}</code> ${loc ? `&middot; Zone: ${loc}` : ''}</div>
-        </div>
-      </div>
-    `;
-  }).join('')}</div>`;
+
+  const resEl = document.getElementById('resolved-incidents-log');
+  if (resEl) {
+    const hist = (appState.incidents || []).slice(0, 6);
+    if (!hist.length) {
+      resEl.innerHTML = '<div style="font-size:11px; color:var(--c-muted);">No archived incidents yet.</div>';
+    } else {
+      resEl.innerHTML = hist.map(inc => {
+        const isRes = inc.status === 'RESOLVED';
+        return `
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 8px; background:#fff; border:1px solid var(--c-border); border-radius:6px; font-size:11px;">
+            <div>
+              <b>${inc.incident_id}</b> &middot; ${inc.root_location || 'Campus'}
+              ${inc.notes ? `<div style="color:var(--c-muted); font-size:10.5px;">${inc.notes}</div>` : ''}
+            </div>
+            <span class="badge ${isRes ? 'safe' : 'critical'}">${inc.status}</span>
+          </div>
+        `;
+      }).join('');
+    }
+  }
 }
 
 // ── CCTV Matrix Grid ───────────────────────────────────────
@@ -1037,6 +1241,8 @@ async function submitModalVideoUpload() {
   const progress = document.getElementById('modal-upload-progress');
   const statusTxt = document.getElementById('modal-upload-status');
   const submitBtn = document.getElementById('modal-upload-submit');
+  const cancelBtn = document.getElementById('modal-upload-cancel');
+  const closeBtn = document.getElementById('modal-upload-close');
   const resBox = document.getElementById('modal-scan-result');
 
   if (!fileInput || !fileInput.files.length) {
@@ -1048,8 +1254,18 @@ async function submitModalVideoUpload() {
 
   resetCriteriaCards();
   if (progress) progress.style.display = 'block';
-  if (statusTxt) statusTxt.textContent = `Fast-scanning ${file.name} on ${targetDev} (8-keyframe early-exit)…`;
-  if (submitBtn) submitBtn.disabled = true;
+  if (statusTxt) statusTxt.textContent = `Scanning ${file.name} on ${targetDev} (YOLOv8 + Multi-Pose + Audio)…`;
+
+  // Lock scan button & modal controls while inference runs
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.classList.add('btn-scanning');
+    submitBtn.innerHTML = '<span class="spinner"></span> Scanning Video…';
+  }
+  if (cancelBtn) cancelBtn.disabled = true;
+  if (closeBtn) closeBtn.disabled = true;
+  if (fileInput) fileInput.disabled = true;
+  if (devSelect) devSelect.disabled = true;
 
   const formData = new FormData();
   formData.append('file', file);
@@ -1058,6 +1274,7 @@ async function submitModalVideoUpload() {
   try {
     const res = await fetch(API + '/api/upload-video', {
       method: 'POST',
+      headers: authHeaders(),
       body: formData,
     });
     const data = await res.json();
@@ -1090,7 +1307,7 @@ async function submitModalVideoUpload() {
         resBox.className = `scan-result-box ${data.criteria_passed ? 'critical' : 'safe'}`;
         resBox.innerHTML = `
           <div style="font-weight:800; margin-bottom:2px;">
-            ${data.criteria_passed ? `THREAT VERIFIED (${data.level})` : `ALL CLEAR — CRITERIA NOT MET (${data.level})`}
+            ${data.criteria_passed ? `THREAT VERIFIED (${data.level}) — EVACUATION ACTIVATED` : `STANDBY — NO THREAT DETECTED (${data.level})`}
             &middot; <span style="font-family:'JetBrains Mono',monospace;">${Number(data.scan_ms || 0).toFixed(0)}ms</span>
             ${data.early_exit ? ' &middot; Early-Exit' : ''}
           </div>
@@ -1104,8 +1321,8 @@ async function submitModalVideoUpload() {
       await refresh();
       toast(
         data.criteria_passed
-          ? `THREAT VERIFIED on ${targetDev} in ${Number(data.scan_ms || 0).toFixed(0)}ms! Evacuation routes active.`
-          : `Scanned ${targetDev} in ${Number(data.scan_ms || 0).toFixed(0)}ms — Criteria not met.`,
+          ? `THREAT VERIFIED on ${targetDev} in ${Number(data.scan_ms || 0).toFixed(0)}ms! Evacuation activated.`
+          : `No threat detected on ${targetDev} (${Number(data.scan_ms || 0).toFixed(0)}ms). System remains on Standby.`,
         data.criteria_passed ? 'critical' : 'success'
       );
     } else {
@@ -1115,7 +1332,15 @@ async function submitModalVideoUpload() {
     toast(`Upload failed: ${err.message}`, 'error');
   } finally {
     if (progress) progress.style.display = 'none';
-    if (submitBtn) submitBtn.disabled = false;
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.classList.remove('btn-scanning');
+      submitBtn.textContent = 'Scan Video Now';
+    }
+    if (cancelBtn) cancelBtn.disabled = false;
+    if (closeBtn) closeBtn.disabled = false;
+    if (fileInput) fileInput.disabled = false;
+    if (devSelect) devSelect.disabled = false;
   }
 }
 
@@ -1173,4 +1398,506 @@ async function clearDetections() {
 function setText(id, val) {
   const el = document.getElementById(id);
   if (el) el.textContent = val;
+}
+
+// ── Hardware Digital Twin & MQTT Telemetry Renderer ────────
+function renderHardwareTwin() {
+  const hw = appState.hardware;
+  if (!hw) return;
+
+  const dev = hw.device || {};
+  const tel = hw.telemetry || {};
+  const brokerOk = !!hw.broker_connected;
+  const espOnline = !!dev.online;
+
+  // Topbar quick pill
+  const topBeacon = document.getElementById('topbar-esp-beacon');
+  const topText = document.getElementById('topbar-esp-text');
+  if (topBeacon) topBeacon.className = `status-beacon ${espOnline ? '' : 'warning'}`;
+  if (topText) topText.textContent = espOnline ? 'ESP32 ONLINE' : 'ESP32 STANDBY';
+
+  // Broker & Node badges
+  const brokerBadge = document.getElementById('hw-broker-badge');
+  const brokerDot = document.getElementById('hw-broker-dot');
+  if (brokerBadge) brokerBadge.className = `badge ${brokerOk ? 'safe' : 'warning'}`;
+  if (brokerDot) brokerDot.className = `status-beacon ${brokerOk ? '' : 'warning'}`;
+  setText('hw-broker-text', brokerOk ? `MQTT: ${hw.broker}:${hw.port}` : 'MQTT: Reconnecting (Local Twin Active)');
+
+  const nodeBadge = document.getElementById('hw-node-badge');
+  const nodeDot = document.getElementById('hw-node-dot');
+  if (nodeBadge) nodeBadge.className = `badge ${espOnline ? 'safe' : 'warning'}`;
+  if (nodeDot) nodeDot.className = `status-beacon ${espOnline ? '' : 'warning'}`;
+  setText('hw-node-text', espOnline ? `Wokwi ${dev.device_id}: ONLINE` : `Wokwi ${dev.device_id}: Waiting Heartbeat`);
+  setText('hw-last-hb', dev.last_heartbeat ? `Last Heartbeat: ${dev.last_heartbeat}` : 'Heartbeat: start Wokwi sketch to connect');
+
+  // Virtual SSD1306 OLED & Buzzer
+  setText('oled-link', espOnline ? '[LIVE]' : '[TWIN]');
+  setText('oled-status', tel.status || 'NORMAL');
+  setText('oled-gate', tel.evac_gate || 'BOTH');
+  const c = tel.counts || {};
+  setText('oled-counts', `S:${c.safe ?? 36}  H:${c.hold ?? 0}  T:${c.blocked ?? 0}  #${tel.seq ?? 0}`);
+
+  const buzBadge = document.getElementById('hw-buzzer-badge');
+  const buzMode = tel.buzzer || 'OFF';
+  if (buzBadge) {
+    buzBadge.className = `badge ${buzMode === 'ALARM' ? 'critical' : buzMode === 'CHIRP' ? 'warning' : 'safe'}`;
+    buzBadge.textContent = `BUZZER: ${buzMode}`;
+  }
+
+  // ESP32 Edge Acoustic Sensor & Link Telemetry (GPIO 34 / Wi-Fi RSSI)
+  const acVal = Number(dev.acoustic_sim ?? 18.0);
+  const pct = Math.min(100, Math.max(0, acVal));
+  setText('hw-fw-badge', dev.firmware || 'SENTINEL-GW-v2.1');
+  setText('hw-acoustic-val', `${acVal.toFixed(1)} dB-idx`);
+  setText('hw-rssi-val', dev.rssi != null ? `${dev.rssi} dBm` : '— dBm');
+  const acBar = document.getElementById('hw-acoustic-bar');
+  if (acBar) {
+    acBar.style.width = `${pct}%`;
+    acBar.className = `acoustic-bar-fill ${acVal >= 85 ? 'crit' : acVal >= 50 ? 'warn' : ''}`;
+  }
+
+  // 12-Channel Addressable NeoPixel Zone Strip
+  const ledStrip = document.getElementById('hw-led-strip');
+  if (ledStrip && Array.isArray(hw.leds)) {
+    ledStrip.innerHTML = hw.leds.map((led, idx) => {
+      const code = led.code || 'S';
+      const label = code === 'T' ? 'THREAT / BLOCKED' : code === 'H' ? 'HOLD / CAUTION' : 'SAFE / OPEN';
+      return `
+        <div class="hw-led-node">
+          <div class="hw-led-top">
+            <span class="hw-led-id">#${idx} · ${led.id}</span>
+            <span class="hw-led-bulb ${code}"></span>
+          </div>
+          <span class="hw-led-sub">${label}</span>
+        </div>
+      `;
+    }).join('');
+  }
+
+  // Live MQTT Packet Stream
+  const pktLog = document.getElementById('hw-packet-log');
+  if (pktLog) {
+    const pkts = hw.packets || [];
+    if (!pkts.length) {
+      pktLog.innerHTML = '<div class="empty-state">No MQTT packets logged yet. Click Sync ESP32 Now.</div>';
+    } else {
+      pktLog.innerHTML = pkts.map(p => `
+        <div class="mqtt-pkt-row">
+          <span style="color:var(--c-muted);">${p.time}</span>
+          <span class="mqtt-dir ${p.dir}">${p.dir}</span>
+          <span style="font-weight:700; color:var(--c-navy);">${p.topic}</span>
+          <span class="mqtt-pkt-payload">${JSON.stringify(p.payload)}</span>
+        </div>
+      `).join('');
+    }
+  }
+}
+
+async function syncHardwareNow() {
+  const res = await apiFetch('/api/hardware/sync', { method: 'POST' });
+  if (res?.ok) {
+    toast('Synced live campus state to ESP32 MQTT topic', 'success');
+    await refresh();
+  }
+}
+
+async function simulateHardwareEdgeTrigger(action) {
+  const res = await apiFetch('/api/hardware/simulate-edge', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action,
+      target_device: 'TPB-F1-CAM-L',
+      acoustic: 88.0,
+      pose: 76.0,
+      object: 85.0,
+    }),
+  });
+  if (res?.ok) {
+    toast(
+      action === 'RESET'
+        ? 'Hardware Reset button simulated — Campus All Clear'
+        : 'ESP32 Break-Glass trigger simulated on TPB-F1-CAM-L!',
+      action === 'RESET' ? 'success' : 'critical'
+    );
+    await refresh();
+  }
+}
+
+// ── Public Occupant Floor & Location Selector ──────────────
+function onLocatorBuildingChange() {
+  const bldg = document.getElementById('loc-bldg')?.value || '';
+  appState.locBldg = bldg;
+  appState.locFloor = '';
+  appState.locRoom = '';
+
+  const flSel = document.getElementById('loc-floor');
+  const rmSel = document.getElementById('loc-room');
+  if (rmSel) rmSel.innerHTML = '<option value="">All Rooms on Floor</option>';
+
+  if (!bldg) {
+    if (flSel) flSel.innerHTML = '<option value="">Select Floor…</option>';
+    switchMapView('campus');
+    updateOccupantGuidance();
+    return;
+  }
+
+  const maxFloors = bldg === 'LB' ? 2 : 4;
+  if (flSel) {
+    let html = '<option value="">All Floors…</option>';
+    for (let f = 1; f <= maxFloors; f++) {
+      html += `<option value="${f}">Floor ${f}</option>`;
+    }
+    flSel.innerHTML = html;
+  }
+  switchMapView(bldg.toLowerCase());
+  updateOccupantGuidance();
+}
+
+function onLocatorFloorChange() {
+  const bldg = appState.locBldg;
+  const fl = document.getElementById('loc-floor')?.value || '';
+  appState.locFloor = fl;
+  appState.locRoom = '';
+
+  const rmSel = document.getElementById('loc-room');
+  if (rmSel) {
+    let html = '<option value="">All Rooms on Floor</option>';
+    if (bldg && fl) {
+      const rpf = bldg === 'TPB' ? 5 : bldg === 'AB' ? 3 : 2;
+      for (let r = 1; r <= rpf; r++) {
+        const rid = `${bldg}-F${fl}-R${r}`;
+        html += `<option value="${rid}">Room ${r} (${rid})</option>`;
+      }
+    }
+    rmSel.innerHTML = html;
+  }
+
+  if (bldg) {
+    switchMapView(bldg.toLowerCase());
+    if (fl) {
+      const card = document.getElementById(`floor-card-${bldg}-F${fl}`);
+      if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }
+  updateOccupantGuidance();
+}
+
+function onLocatorRoomChange() {
+  appState.locRoom = document.getElementById('loc-room')?.value || '';
+  if (appState.locBldg) switchMapView(appState.locBldg.toLowerCase());
+  updateOccupantGuidance();
+}
+
+function inspectRoomFromBlueprint(roomId) {
+  const parts = roomId.split('-');
+  if (parts.length !== 3) return;
+  const bldg = parts[0];
+  const fl = parts[1].replace('F', '');
+  appState.locBldg = bldg;
+  appState.locFloor = fl;
+  appState.locRoom = roomId;
+
+  const bSel = document.getElementById('loc-bldg');
+  if (bSel && bSel.value !== bldg) {
+    bSel.value = bldg;
+    onLocatorBuildingChange();
+  }
+  const fSel = document.getElementById('loc-floor');
+  if (fSel && fSel.value !== fl) {
+    fSel.value = fl;
+    onLocatorFloorChange();
+  }
+  const rSel = document.getElementById('loc-room');
+  if (rSel) rSel.value = roomId;
+  appState.locRoom = roomId;
+
+  if (appState.user) {
+    const sbSel = document.getElementById('sb-room-select');
+    if (sbSel) {
+      sbSel.value = roomId;
+      updateRoomInspectorCard(roomId);
+    }
+  }
+  switchMapView(bldg.toLowerCase());
+  updateOccupantGuidance();
+}
+
+function updatePublicThreatBar(snapshot) {
+  const bar = document.getElementById('public-threat-bar');
+  const beacon = document.getElementById('ptb-beacon');
+  const zonesEl = document.getElementById('ptb-zones');
+  const actEl = document.getElementById('ptb-action');
+  if (!bar || !snapshot) return;
+
+  const lvl = (snapshot.global_status || 'NORMAL').toUpperCase();
+  const locs = snapshot.possible_threat_locations || [];
+  const blocked = snapshot.blocked || [];
+  const gatesBlocked = ['GATE-W', 'GATE-NE'].filter(g => blocked.includes(g));
+
+  bar.className = 'threat-loc-bar';
+  beacon.className = 'status-beacon';
+
+  if (lvl === 'NORMAL') {
+    zonesEl.textContent = 'NONE — ALL CAMPUS ZONES CLEAR';
+    actEl.textContent = 'Click any building or room to inspect exit paths';
+    return;
+  }
+
+  bar.classList.add(lvl === 'CRITICAL' ? 'critical' : 'warning');
+  beacon.classList.add(lvl === 'CRITICAL' ? 'critical' : 'warning');
+
+  const displayLocs = [...new Set([...locs, ...gatesBlocked])];
+  zonesEl.textContent = displayLocs.length
+    ? `${displayLocs.join(', ')} (AVOID AREA)`
+    : 'Perimeter Caution / Override Active';
+  actEl.textContent = lvl === 'CRITICAL'
+    ? 'FOLLOW GREEN ARROWS AWAY FROM THREAT'
+    : 'Use Alternate Safe Corridors & Gates';
+}
+
+function clearFloorLocation() {
+  appState.locBldg = '';
+  appState.locFloor = '';
+  appState.locRoom = '';
+  const bSel = document.getElementById('loc-bldg');
+  const fSel = document.getElementById('loc-floor');
+  const rSel = document.getElementById('loc-room');
+  if (bSel) bSel.value = '';
+  if (fSel) fSel.innerHTML = '<option value="">Select Floor…</option>';
+  if (rSel) rSel.innerHTML = '<option value="">All Rooms on Floor</option>';
+  switchMapView('campus');
+  updateOccupantGuidance();
+}
+
+function updateOccupantGuidance() {
+  const box = document.getElementById('occupant-guidance-card');
+  if (!box) return;
+  const { locBldg, locFloor, locRoom, snapshot } = appState;
+  if (!locBldg || !snapshot?.routes) {
+    box.style.display = 'none';
+    return;
+  }
+
+  let targets = Object.entries(snapshot.routes).filter(([rm]) => {
+    if (locRoom) return rm === locRoom;
+    if (locFloor) return rm.startsWith(`${locBldg}-F${locFloor}-`);
+    return rm.startsWith(`${locBldg}-`);
+  });
+  if (!targets.length) {
+    box.style.display = 'none';
+    return;
+  }
+
+  const safe = targets.filter(([_, r]) => r.status === 'MODELED_ROUTE_AVAILABLE');
+  const hold = targets.filter(([_, r]) => r.status === 'HOLD_FOR_AUTHORIZED_GUIDANCE');
+  const crit = targets.filter(([_, r]) => r.status === 'NO_CONFIRMED_ROUTE');
+  const unavail = targets.filter(([_, r]) => r.status === 'FACILITY_UNAVAILABLE');
+  const labelLoc = locRoom || (locFloor ? `${locBldg} Floor ${locFloor}` : `${locBldg} Building`);
+
+  let cls = '';
+  let title = '';
+  let detail = '';
+
+  if (crit.length > 0) {
+    cls = 'critical';
+    title = `${labelLoc}: DANGER — DO NOT ENTER AFFECTED ZONE`;
+    detail = `${crit.length} room(s) compromised. Stay sheltered or await first responders.`;
+  } else if (hold.length > 0 && safe.length === 0) {
+    cls = 'warning';
+    title = `${labelLoc}: HOLD IN PLACE`;
+    detail = hold[0][1].reason || 'Descent route temporarily blocked. Await personnel guidance.';
+  } else if (unavail.length === targets.length) {
+    cls = 'unavail';
+    title = `${labelLoc}: CLOSED / UNAVAILABLE FOR MAINTENANCE`;
+    detail = 'Facility personnel marked this area out of service (Gray X).';
+  } else {
+    cls = '';
+    const gates = [...new Set(safe.map(([_, r]) => r.gate).filter(Boolean))].join(' or ');
+    const doors = locRoom && safe[0] ? ` via ${safe[0][1].door_label}` : '';
+    const stairSet = new Set();
+    safe.forEach(([_, r]) => (r.route || []).forEach(n => {
+      if (n.includes('STAIR-L')) stairSet.add('Left Stair');
+      if (n.includes('STAIR-R')) stairSet.add('Right Stair');
+    }));
+    const stairsTxt = stairSet.size ? ` (${[...stairSet].join(' / ')})` : '';
+    title = `${labelLoc}: SAFE EGRESS AVAILABLE`;
+    detail = `Follow green arrows${doors}${stairsTxt} toward ${gates || 'nearest open exit gate'}.${unavail.length ? ` (${unavail.length} closed room(s) marked Gray X)` : ''}`;
+  }
+
+  box.style.display = 'flex';
+  box.className = `occupant-guidance-card ${cls}`;
+  box.innerHTML = `
+    <div>
+      <div style="font-size:13px; font-weight:800;">${title}</div>
+      <div style="font-size:11.5px; font-weight:500; opacity:0.95;">${detail}</div>
+    </div>
+    <span class="badge ${cls === '' ? 'safe' : cls}">${safe.length}/${targets.length} Safe</span>
+  `;
+}
+
+// ── Authentication & RBAC Session Controllers ──────────────
+async function checkAuthSession() {
+  if (!appState.token) {
+    appState.user = null;
+    applyAuthUI();
+    return;
+  }
+  try {
+    const res = await fetch(API + '/api/auth/me', { headers: authHeaders() });
+    const data = await res.json();
+    if (data?.authenticated && data.user) {
+      appState.user = data.user;
+    } else {
+      appState.user = null;
+      appState.token = null;
+      localStorage.removeItem('sentinel_token');
+    }
+  } catch {
+    appState.user = null;
+  }
+  applyAuthUI();
+}
+
+function applyAuthUI() {
+  const role = appState.user?.role || 'public';
+  document.body.setAttribute('data-auth', role);
+  setText('brand-mode-tag', appState.user ? `${role === 'IT_TECHNICIAN' ? 'IT ADMIN' : 'PERSONNEL'}` : 'CAMPUS EVACUATION MAP');
+
+  if (appState.user) {
+    setText('user-role-badge', role === 'IT_TECHNICIAN' ? 'IT TECH' : 'PERSONNEL');
+    setText('user-display-name', appState.user.full_name || appState.user.username);
+  } else {
+    // Public view always remains strictly on Map & Blueprints
+    if (appState.activeTab !== 'map') {
+      switchTab('map');
+    }
+  }
+}
+
+function openAuthModal(tab = 'login') {
+  const m = document.getElementById('auth-modal');
+  if (!m) return;
+  switchAuthTab(tab);
+  const le = document.getElementById('auth-login-error');
+  const re = document.getElementById('auth-reg-error');
+  if (le) le.style.display = 'none';
+  if (re) re.style.display = 'none';
+  m.style.display = 'flex';
+}
+
+function closeAuthModal() {
+  const m = document.getElementById('auth-modal');
+  if (m) m.style.display = 'none';
+}
+
+function switchAuthTab(tab) {
+  const isLogin = tab === 'login';
+  document.getElementById('auth-tab-login')?.classList.toggle('active', isLogin);
+  document.getElementById('auth-tab-register')?.classList.toggle('active', !isLogin);
+  const pl = document.getElementById('auth-panel-login');
+  const pr = document.getElementById('auth-panel-register');
+  if (pl) pl.style.display = isLogin ? 'flex' : 'none';
+  if (pr) pr.style.display = isLogin ? 'none' : 'flex';
+}
+
+function fillDemoCreds(u, p) {
+  const uEl = document.getElementById('login-username');
+  const pEl = document.getElementById('login-password');
+  if (uEl) uEl.value = u;
+  if (pEl) pEl.value = p;
+}
+
+async function submitLogin() {
+  const username = document.getElementById('login-username')?.value.trim() || '';
+  const password = document.getElementById('login-password')?.value || '';
+  const errEl = document.getElementById('auth-login-error');
+  if (errEl) errEl.style.display = 'none';
+
+  try {
+    const res = await fetch(API + '/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      if (errEl) {
+        errEl.textContent = data.detail || 'Invalid username or password.';
+        errEl.style.display = 'block';
+      }
+      return;
+    }
+    appState.token = data.token;
+    appState.user = data.user;
+    localStorage.setItem('sentinel_token', data.token);
+    applyAuthUI();
+    closeAuthModal();
+    toast(`Signed in as ${data.user.full_name} (${data.user.role})`, 'success');
+    await loadInitialMeta();
+    await refresh();
+  } catch (e) {
+    if (errEl) {
+      errEl.textContent = e.message;
+      errEl.style.display = 'block';
+    }
+  }
+}
+
+async function submitRegister() {
+  const full_name = document.getElementById('reg-fullname')?.value.trim() || '';
+  const username  = document.getElementById('reg-username')?.value.trim() || '';
+  const role      = document.getElementById('reg-role')?.value || 'PERSONNEL';
+  const auth_code = document.getElementById('reg-authcode')?.value.trim() || '';
+  const password  = document.getElementById('reg-password')?.value || '';
+  const password2 = document.getElementById('reg-password2')?.value || '';
+  const errEl     = document.getElementById('auth-reg-error');
+  if (errEl) errEl.style.display = 'none';
+
+  if (password !== password2) {
+    if (errEl) {
+      errEl.textContent = 'Passwords do not match.';
+      errEl.style.display = 'block';
+    }
+    return;
+  }
+
+  try {
+    const res = await fetch(API + '/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ full_name, username, role, auth_code, password }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      if (errEl) {
+        errEl.textContent = data.detail || 'Account registration failed.';
+        errEl.style.display = 'block';
+      }
+      return;
+    }
+    appState.token = data.token;
+    appState.user = data.user;
+    localStorage.setItem('sentinel_token', data.token);
+    applyAuthUI();
+    closeAuthModal();
+    toast(`Account created! Signed in as ${data.user.full_name} (${data.user.role})`, 'success');
+    await loadInitialMeta();
+    await refresh();
+  } catch (e) {
+    if (errEl) {
+      errEl.textContent = e.message;
+      errEl.style.display = 'block';
+    }
+  }
+}
+
+async function logoutUser() {
+  await fetch(API + '/api/auth/logout', { method: 'POST', headers: authHeaders() }).catch(() => {});
+  appState.token = null;
+  appState.user = null;
+  localStorage.removeItem('sentinel_token');
+  applyAuthUI();
+  toast('Signed out — Switched to Public Map & Blueprints view', 'info');
+  await refresh();
 }
