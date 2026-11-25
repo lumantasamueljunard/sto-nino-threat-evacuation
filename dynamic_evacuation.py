@@ -101,13 +101,15 @@ def build():
             COVERAGE[did] = frozenset((out,))
 
     # Paved outdoor path network connecting buildings and perimeter gates.
+    # Weights reflect actual campus site-plan distances so Academic (east) naturally
+    # uses nearby GATE-NE without crossing past Tech Pro / Lab toward GATE-W.
     for a, b_node, w in [
-        ('TPB-OUT-L', 'WEST-PATH', 2), ('LB-OUT-L', 'WEST-PATH', 3),
+        ('TPB-OUT-L', 'WEST-PATH', 2), ('LB-OUT-L', 'WEST-PATH', 2),
         ('WEST-PATH', 'GATE-W', 2),
         ('TPB-OUT-R', 'NORTH-PATH', 2), ('NORTH-PATH', 'GATE-NE', 2),
-        ('AB-OUT-R', 'EAST-PATH', 3), ('EAST-PATH', 'NORTH-PATH', 3),
+        ('AB-OUT-R', 'EAST-PATH', 2), ('EAST-PATH', 'NORTH-PATH', 2),
         ('AB-OUT-L', 'COURTYARD', 2), ('LB-OUT-R', 'COURTYARD', 2),
-        ('COURTYARD', 'WEST-PATH', 4), ('COURTYARD', 'EAST-PATH', 4),
+        ('COURTYARD', 'WEST-PATH', 6), ('COURTYARD', 'EAST-PATH', 3),
         ('TPB-OUT-L', 'COURTYARD', 3), ('TPB-OUT-R', 'COURTYARD', 4),
     ]:
         _edge(a, b_node, w)
@@ -304,6 +306,12 @@ def assess(observations, manual_blocks=(), closed_edges=(), unavailable_gates=()
             p = f'{b}-F{f}'
             blocked.update(f'{p}-C{i}' for i in range(BUILDINGS[b][1] + 1))
             blocked.update((f'{p}-STAIR-L', f'{p}-STAIR-R'))
+            # Ground-floor / west-approach perimeter buffer:
+            # A ground-floor CRITICAL in Laboratory compromises the adjacent WEST-PATH
+            # approach so evacuees from Tech Pro / Academic do not walk past the threat
+            # toward Gate-W when Gate-NE is available.
+            if b == 'LB' and f == 1 and 'GATE-NE' not in blocked and 'GATE-NE' not in unavailable_gates:
+                blocked.update(('LB-OUT-L', 'WEST-PATH'))
         else:
             # Outdoor CRITICAL:
             dev_id = o.device_id
@@ -315,6 +323,9 @@ def assess(observations, manual_blocks=(), closed_edges=(), unavailable_gates=()
             elif dev_id == 'TPB-CAM-OUT-R' or 'GATE-NE' in area or 'TPB-OUT-R' in area:
                 # Threat at Gate-NE: Compromise Gate-NE, North-Path, and the adjacent right stair
                 blocked.update(('GATE-NE', 'NORTH-PATH', 'TPB-OUT-R', 'TPB-F1-STAIR-R'))
+            elif dev_id == 'AB-CAM-OUT-R' or 'AB-OUT-R' in area:
+                # Academic east approach threat compromises EAST-PATH toward Gate-NE for AB
+                blocked.update(('AB-OUT-R', 'EAST-PATH', 'AB-F1-STAIR-R'))
             else:
                 blocked.update(area)
                 if b and side:

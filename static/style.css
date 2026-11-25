@@ -211,8 +211,8 @@ b, strong { font-weight: 600; }
 .nav-pill {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 7px 14px;
+  gap: 6px;
+  padding: 6px 11px;
   border-radius: var(--r-pill);
   border: none;
   background: transparent;
@@ -530,15 +530,19 @@ select:focus, .input-select:focus {
   padding: 9px 10px;
   min-height: 58px;
   border-radius: var(--r-md);
-  border: 1px solid var(--c-green-bdr);
-  background: var(--c-green-bg);
+  border: 1px solid var(--c-border-str);
+  background: var(--c-surface);
   font-family: inherit;
   cursor: pointer;
   text-align: left;
-  transition: border-color var(--t-fast);
+  transition: border-color var(--t-fast), background var(--t-fast);
 }
-.gate-pill-btn:hover { border-color: var(--c-green); }
-.gate-pill-btn.blocked { border-color: var(--c-red-bdr); background: var(--c-red-bg); }
+.gate-pill-btn:hover { border-color: var(--c-muted); background: var(--c-surface-2); }
+.gate-pill-btn.blocked {
+  border-color: var(--c-border-str);
+  border-left: 3px solid var(--c-red);
+  background: var(--c-surface);
+}
 .gate-pill-btn.blocked:hover { border-color: var(--c-red); }
 .gate-pill-top {
   display: flex;
@@ -614,32 +618,36 @@ select:focus, .input-select:focus {
   gap: 12px;
 }
 
-/* Emergency banner */
+/* Emergency banner — calm 60/30/10 white surface with sharp semantic accent */
 .emergency-banner {
   display: none;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 14px 18px;
+  padding: 12px 16px;
   border-radius: var(--r-md);
-  background: var(--c-red-bg);
-  border: 1px solid var(--c-red-bdr);
-  color: var(--c-red-text);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border-str);
+  border-left: 4px solid var(--c-red);
+  color: var(--c-navy);
+  box-shadow: var(--sh-sm);
 }
 .emergency-banner.visible { display: flex; }
 .emergency-banner.warning {
-  background: var(--c-amber-bg);
-  border-color: var(--c-amber-bdr);
-  color: var(--c-amber-text);
+  background: var(--c-surface);
+  border-color: var(--c-border-str);
+  border-left: 4px solid var(--c-amber);
+  color: var(--c-navy);
 }
 .eb-left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
 }
-.eb-title { font-size: var(--fs-md); font-weight: 700; }
-.eb-sub { font-size: var(--fs-base); }
+.eb-title { font-size: var(--fs-md); font-weight: 700; color: var(--c-red); }
+.emergency-banner.warning .eb-title { color: var(--c-amber-text); }
+.eb-sub { font-size: var(--fs-base); color: var(--c-slate); }
 
 /* Room counts: one strip, divided by hairlines */
 .metrics-grid {
@@ -901,9 +909,9 @@ body[data-auth="public"] .map-canvas-wrap {
   white-space: nowrap;
   border: 1px solid transparent;
 }
-.badge.safe     { background: var(--c-green-bg); color: var(--c-green-text); border-color: var(--c-green-bdr); }
-.badge.warning  { background: var(--c-amber-bg); color: var(--c-amber-text); border-color: var(--c-amber-bdr); }
-.badge.critical { background: var(--c-red-bg);   color: var(--c-red-text);   border-color: var(--c-red-bdr); }
+.badge.safe     { background: var(--c-surface-2); color: var(--c-slate); border-color: var(--c-border); }
+.badge.warning  { background: var(--c-surface); color: var(--c-amber-text); border-color: var(--c-amber-bdr); }
+.badge.critical { background: var(--c-red-bg); color: var(--c-red-text); border-color: var(--c-red-bdr); }
 .badge.unavail  { background: #f1f5f9; color: #334155; border-color: #cbd5e1; }
 
 /* ── Rooms and logs ────────────────────────────────────── */
@@ -1155,10 +1163,10 @@ body[data-auth="public"] .map-canvas-wrap {
 
 .emergency-banner .btn-primary {
   background: var(--c-surface);
-  border-color: currentColor;
-  color: inherit;
+  border-color: var(--c-border-str);
+  color: var(--c-navy);
 }
-.emergency-banner .btn-primary:hover { background: rgba(255, 255, 255, 0.6); }
+.emergency-banner .btn-primary:hover { background: var(--c-surface-2); border-color: var(--c-muted); }
 
 .btn:disabled,
 .btn.btn-scanning {
@@ -1515,11 +1523,12 @@ body[data-auth="IT_TECHNICIAN"] .public-only { display: none !important; }
 
 /* ── Threat location bar (shown only on threat or brief apprehended notice) ── */
 .threat-loc-bar {
-  padding: 14px 18px;
+  padding: 10px 16px;
   border-radius: var(--r-md);
-  border: 1px solid var(--c-green-bdr);
-  background: var(--c-green-bg);
-  color: var(--c-green-text);
+  border: 1px solid var(--c-border);
+  border-left: 3px solid var(--c-green);
+  background: var(--c-surface);
+  color: var(--c-navy);
   display: none;
   align-items: center;
   justify-content: space-between;
@@ -1527,13 +1536,16 @@ body[data-auth="IT_TECHNICIAN"] .public-only { display: none !important; }
   flex-wrap: wrap;
 }
 .threat-loc-bar.visible { display: flex; }
-.threat-loc-bar.resolved { background: var(--c-green-bg); border-color: var(--c-green-bdr); color: var(--c-green-text); }
-.threat-loc-bar.warning { background: var(--c-amber-bg); border-color: var(--c-amber-bdr); color: var(--c-amber-text); }
-.threat-loc-bar.critical { background: var(--c-red-bg); border-color: var(--c-red-bdr); color: var(--c-red-text); }
-.ptb-left { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.ptb-label { font-size: var(--fs-md); font-weight: 400; }
-.ptb-zones { font-size: var(--fs-lg); font-weight: 700; }
-.ptb-action { font-size: var(--fs-base); }
+.threat-loc-bar.resolved { background: var(--c-surface); border-color: var(--c-border); border-left: 3px solid var(--c-green); color: var(--c-navy); }
+.threat-loc-bar.resolved .ptb-zones { color: var(--c-green-text); }
+.threat-loc-bar.warning { background: var(--c-surface); border-color: var(--c-border); border-left: 3px solid var(--c-amber); color: var(--c-navy); }
+.threat-loc-bar.warning .ptb-zones { color: var(--c-amber-text); }
+.threat-loc-bar.critical { background: var(--c-surface); border-color: var(--c-border); border-left: 3px solid var(--c-red); color: var(--c-navy); }
+.threat-loc-bar.critical .ptb-zones { color: var(--c-red); }
+.ptb-left { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ptb-label { font-size: var(--fs-sm); font-weight: 500; color: var(--c-muted); }
+.ptb-zones { font-size: var(--fs-md); font-weight: 700; }
+.ptb-action { font-size: var(--fs-sm); color: var(--c-slate); }
 
 body[data-auth="public"] .ptb-zones { font-size: 24px; }
 body[data-auth="public"] .ptb-label,
@@ -1616,6 +1628,182 @@ body[data-auth="public"] .threat-loc-bar { padding: 20px 24px; }
   border: 1px solid var(--c-red-bdr);
   color: var(--c-red-text);
   font-size: var(--fs-sm);
+}
+.auth-success {
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--c-green-bg);
+  border: 1px solid var(--c-green-bdr);
+  color: var(--c-green-text);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+.btn-account-mini {
+  height: 26px;
+  padding: 0 9px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--c-border-str);
+  background: var(--c-surface);
+  color: var(--c-navy);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--t-fast), border-color var(--t-fast);
+}
+.btn-account-mini:hover {
+  background: var(--c-blue-bg);
+  border-color: var(--c-blue);
+  color: var(--c-blue);
+}
+.btn-danger {
+  background: var(--c-red);
+  border-color: var(--c-red);
+  color: #fff;
+  font-weight: 600;
+}
+.btn-danger:hover {
+  background: #b91c1c;
+  border-color: #b91c1c;
+}
+.account-profile-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--r-md);
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-border);
+}
+.account-profile-name {
+  font-size: var(--fs-md);
+  font-weight: 700;
+  color: var(--c-navy);
+}
+.account-profile-meta {
+  font-size: var(--fs-sm);
+  color: var(--c-muted);
+  font-family: 'Atkinson Hyperlegible Mono', monospace;
+}
+.account-section-card {
+  padding: 14px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
+}
+.account-section-title {
+  font-size: var(--fs-base);
+  font-weight: 700;
+  color: var(--c-navy);
+  margin-bottom: 8px;
+}
+.del-warning-box {
+  padding: 12px 14px;
+  border-radius: var(--r-md);
+  background: var(--c-red-bg);
+  border: 1px solid var(--c-red-bdr);
+  color: var(--c-navy);
+  font-size: var(--fs-base);
+  line-height: 1.45;
+}
+.acct-protected-tag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--c-muted);
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-pill);
+  padding: 2px 9px;
+}
+.accounts-stack-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.sb-nav-btn {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 8px;
+  font-weight: 500;
+}
+.sb-nav-btn.active {
+  background: var(--c-blue-bg);
+  border-color: var(--c-blue);
+  color: var(--c-blue);
+  font-weight: 600;
+}
+
+/* ── Emergency 911 QR Code (CRITICAL threat only) ──────── */
+.eb-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.qr-911-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 4px 4px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--c-red-bdr);
+  background: #ffffff;
+  color: var(--c-navy);
+  cursor: pointer;
+  font-family: inherit;
+  transition: transform var(--t-fast), box-shadow var(--t-fast);
+}
+.qr-911-chip:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--sh-sm);
+}
+.qr-911-thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: 4px;
+  display: block;
+}
+.qr-911-chip-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.15;
+}
+.qr-911-chip-text strong {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--c-red);
+}
+.qr-911-chip-text span {
+  font-size: 11px;
+  color: var(--c-muted);
+}
+.qr-911-modal-box {
+  display: flex;
+  justify-content: center;
+  padding: 14px;
+  border-radius: var(--r-md);
+  background: #ffffff;
+  border: 2px solid var(--c-red-bdr);
+}
+.qr-911-large {
+  width: 210px;
+  height: 210px;
+  display: block;
+}
+#user-display-name {
+  display: inline-block;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+@media (max-width: 1380px) {
+  .nav-pill { padding: 6px 10px; gap: 5px; font-size: 12.5px; }
+  #user-display-name { max-width: 110px; }
 }
 
 /* ── Responsive ────────────────────────────────────────── */

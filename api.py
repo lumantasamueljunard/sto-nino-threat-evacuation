@@ -315,10 +315,63 @@ async def auth_me(authorization: Optional[str] = Header(default=None)):
     return {"authenticated": True, "user": user}
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class DeleteUserRequest(BaseModel):
+    password: str
+
+
 @app.get("/api/auth/users")
 async def auth_users(user: dict = Depends(require_it)):
     """IT Technician-only: list registered personnel and IT accounts."""
     return {"ok": True, "users": database.list_users()}
+
+
+@app.post("/api/auth/change-password")
+async def auth_change_password(req: ChangePasswordRequest, user: dict = Depends(require_staff)):
+    """Authenticated Personnel or IT Technician: change own password and log the update."""
+    try:
+        res = database.change_user_password(user["user_id"], req.current_password, req.new_password)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return {"ok": True, "message": "Password updated successfully.", **res}
+
+
+@app.post("/api/auth/users/{target_user_id}/delete")
+async def auth_delete_user(target_user_id: int, req: DeleteUserRequest, user: dict = Depends(require_it)):
+    """IT Technician-only: password-confirmed account deletion respecting Main IT hierarchy."""
+    if not req.password:
+        raise HTTPException(status_code=400, detail="Your IT Technician password is required to confirm deletion.")
+    try:
+        res = database.delete_user_account(user["user_id"], req.password, target_user_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return {"ok": True, "message": f"Account '{res['deleted_username']}' has been deleted.", **res}
+
+
+@app.get("/api/auth/activity-logs")
+async def auth_activity_logs(
+    scope: str = "all",
+    category: str = "all",
+    limit: int = 120,
+    user: dict = Depends(require_staff),
+):
+    """Role-scoped account activity logs.
+
+    - Personnel strictly receive only their own login, logout, and password-change logs.
+    - IT Technicians receive all Personnel & IT Technician account logs (or scope='mine').
+    """
+    logs = database.get_account_activity_logs(user, scope=scope, category=category, limit=limit)
+    return {"ok": True, "role": user["role"], "is_main_it": bool(user.get("is_main_it")), "logs": logs}
 
 
 class ThreatSimRequest(BaseModel):

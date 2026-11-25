@@ -320,6 +320,8 @@ function updateTopbarStatus(status, snapshot) {
   pill.className = 'global-status-pill';
   beacon.className = 'status-beacon';
 
+  const qrChip = document.getElementById('emergency-qr-chip');
+
   if (lvl === 'CRITICAL') {
     pill.classList.add('critical');
     beacon.classList.add('critical');
@@ -331,6 +333,7 @@ function updateTopbarStatus(status, snapshot) {
     const holdCnt = snapshot.counts?.hold ?? snapshot.counts?.['HOLD_FOR_AUTHORIZED_GUIDANCE'] ?? 0;
     const blkCnt  = snapshot.counts?.no_route ?? snapshot.counts?.['NO_CONFIRMED_ROUTE'] ?? 0;
     ebSub.textContent = `${safeCnt} rooms evacuating, ${holdCnt} holding in place, ${blkCnt} blocked.`;
+    if (qrChip) qrChip.style.display = 'inline-flex';
   } else if (lvl === 'WARNING') {
     pill.classList.add('warning');
     beacon.classList.add('warning');
@@ -339,11 +342,35 @@ function updateTopbarStatus(status, snapshot) {
     ebBeacon.className = 'status-beacon warning';
     ebTitle.textContent = 'Caution active';
     ebSub.textContent = 'Routes adjusted around restricted zones or gates.';
+    if (qrChip) qrChip.style.display = 'none';
+    closeQr911Modal();
   } else {
     text.textContent = 'All clear';
     banner.className = 'emergency-banner';
+    if (qrChip) qrChip.style.display = 'none';
+    closeQr911Modal();
   }
 }
+
+function openQr911Modal() {
+  const m = document.getElementById('qr-911-modal');
+  if (m) m.style.display = 'flex';
+}
+
+function closeQr911Modal() {
+  const m = document.getElementById('qr-911-modal');
+  if (m) m.style.display = 'none';
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closeQr911Modal();
+    closeDeleteAccountModal();
+    closeAuthModal();
+    closeUploadModal();
+    closeSimModal();
+  }
+});
 
 // ── Sidebar Controls Sync ──────────────────────────────────
 function updateSidebarControls(status) {
@@ -390,9 +417,14 @@ function switchTab(tab) {
   appState.activeTab = tab;
   document.querySelectorAll('.nav-pill').forEach(b => b.classList.remove('active'));
   document.getElementById(`tab-btn-${tab}`)?.classList.add('active');
+  document.getElementById('sb-btn-accounts')?.classList.toggle('active', tab === 'accounts');
 
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   document.getElementById(`tab-${tab}`)?.classList.add('active');
+
+  if (tab === 'accounts' && appState.user) {
+    loadAccountsTabData();
+  }
 }
 
 function switchMapView(view) {
@@ -1836,15 +1868,22 @@ async function checkAuthSession() {
 
 function applyAuthUI() {
   const role = appState.user?.role || 'public';
+  const isMainIt = Boolean(appState.user?.is_main_it);
   document.body.setAttribute('data-auth', role);
-  setText('brand-mode-tag', appState.user ? `${role === 'IT_TECHNICIAN' ? 'IT admin' : 'Personnel'}` : 'Evacuation map');
+  setText(
+    'brand-mode-tag',
+    appState.user ? (role === 'IT_TECHNICIAN' ? (isMainIt ? 'Main IT admin' : 'IT admin') : 'Personnel') : 'Evacuation map'
+  );
 
   if (appState.user) {
-    setText('user-role-badge', role === 'IT_TECHNICIAN' ? 'IT tech' : 'Personnel');
+    setText('user-role-badge', role === 'IT_TECHNICIAN' ? (isMainIt ? 'Main IT' : 'IT tech') : 'Personnel');
     setText('user-display-name', appState.user.full_name || appState.user.username);
     appState.locBldg = '';
     appState.locFloor = '';
     appState.locRoom = '';
+    if (role !== 'IT_TECHNICIAN' && appState.activeTab === 'hardware') {
+      switchTab('map');
+    }
   } else {
     // Public view always remains strictly on Map & Blueprints
     if (appState.activeTab !== 'map') {
@@ -1975,6 +2014,8 @@ async function logoutUser() {
   appState.token = null;
   appState.user = null;
   localStorage.removeItem('sentinel_token');
+  closeAccountModal();
+  closeDeleteAccountModal();
   const rmSel = document.getElementById('sb-room-select');
   if (rmSel) rmSel.value = '';
   const ins = document.getElementById('inspector-result');
@@ -1982,4 +2023,312 @@ async function logoutUser() {
   applyAuthUI();
   toast('Signed out. Switched to public map view.', 'info');
   await refresh();
+}
+
+// ── Account Security, Password Change & Activity Logs ──────
+let _acctLogCategory = 'all';
+let _pendingDeleteTarget = null;
+
+function _escHtml(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function _formatRoleLabel(role, isMainIt = false) {
+  if (role === 'IT_TECHNICIAN') return isMainIt ? 'Main IT Tech' : 'IT Tech';
+  return 'Personnel';
+}
+
+function _formatActivityBadge(action) {
+  switch (action) {
+    case 'USER_LOGIN':      return '<span class="badge safe">Sign in</span>';
+    case 'USER_LOGOUT':     return '<span class="badge" style="background:var(--c-pill-bg);color:var(--c-slate);border-color:var(--c-border-str);">Sign out</span>';
+    case 'PASSWORD_CHANGE': return '<span class="badge warning">Password changed</span>';
+    case 'USER_REGISTER':   return '<span class="badge safe">Account created</span>';
+    case 'USER_DELETE':     return '<span class="badge critical">Account deleted</span>';
+    default:                return `<span class="badge">${_escHtml(action)}</span>`;
+  }
+}
+
+function _formatActivityDetails(log) {
+  const d = log.details_obj || {};
+  if (log.action === 'USER_DELETE') {
+    const delName = d.deleted_full_name ? `${d.deleted_full_name} (@${d.deleted_username})` : `@${d.deleted_username || 'unknown'}`;
+    const delRole = _formatRoleLabel(d.deleted_role, false);
+    return `Deleted ${delName} · ${delRole}`;
+  }
+  if (log.action === 'PASSWORD_CHANGE') {
+    return `${_formatRoleLabel(d.role)} updated password`;
+  }
+  if (log.action === 'USER_LOGIN') {
+    return `${_formatRoleLabel(d.role)} signed in`;
+  }
+  if (log.action === 'USER_LOGOUT') {
+    return `${_formatRoleLabel(d.role)} signed out`;
+  }
+  if (log.action === 'USER_REGISTER') {
+    return `Registered as ${_formatRoleLabel(d.role)}`;
+  }
+  return _escHtml(log.details || '—');
+}
+
+function populateAccountProfileCard() {
+  if (!appState.user) return;
+  setText('acct-prof-name', appState.user.full_name || appState.user.username);
+  setText('acct-prof-username', `@${appState.user.username}`);
+  const roleBadge = document.getElementById('acct-prof-role');
+  if (roleBadge) {
+    roleBadge.textContent = _formatRoleLabel(appState.user.role, appState.user.is_main_it);
+    roleBadge.className = appState.user.role === 'IT_TECHNICIAN'
+      ? (appState.user.is_main_it ? 'badge critical' : 'badge warning')
+      : 'badge safe';
+  }
+}
+
+function closeAccountModal() {
+  // Unified into the Accounts & logs tab; kept as no-op for clean logout compatibility
+}
+
+async function submitChangePassword() {
+  const current_password = document.getElementById('cp-current')?.value || '';
+  const new_password     = document.getElementById('cp-new')?.value || '';
+  const confirm_password = document.getElementById('cp-confirm')?.value || '';
+  const errEl = document.getElementById('cp-error');
+  const okEl  = document.getElementById('cp-success');
+  if (errEl) errEl.style.display = 'none';
+  if (okEl) okEl.style.display = 'none';
+
+  if (!current_password || !new_password) {
+    if (errEl) { errEl.textContent = 'Please fill in your current and new password.'; errEl.style.display = 'block'; }
+    return;
+  }
+  if (new_password.length < 6) {
+    if (errEl) { errEl.textContent = 'New password must be at least 6 characters.'; errEl.style.display = 'block'; }
+    return;
+  }
+  if (new_password !== confirm_password) {
+    if (errEl) { errEl.textContent = 'New passwords do not match.'; errEl.style.display = 'block'; }
+    return;
+  }
+
+  try {
+    const res = await fetch(API + '/api/auth/change-password', {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ current_password, new_password }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      if (errEl) { errEl.textContent = data.detail || 'Could not update password.'; errEl.style.display = 'block'; }
+      return;
+    }
+    ['cp-current', 'cp-new', 'cp-confirm'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+    if (okEl) { okEl.textContent = 'Password updated and logged in your activity history.'; okEl.style.display = 'block'; }
+    toast('Password updated successfully.', 'success');
+    await loadAccountLogsForTab();
+  } catch (e) {
+    if (errEl) { errEl.textContent = e.message; errEl.style.display = 'block'; }
+  }
+}
+
+// ── Unified Accounts & Activity Logs Tab ───────────────────
+async function filterAccountLogs(category) {
+  _acctLogCategory = category;
+  document.querySelectorAll('#tab-accounts .filter-pill').forEach(b => b.classList.remove('active'));
+  document.getElementById(`acclog-f-${category}`)?.classList.add('active');
+  await loadAccountLogsForTab();
+}
+
+async function loadAccountsTabData() {
+  if (!appState.user) return;
+  populateAccountProfileCard();
+  const tasks = [loadAccountLogsForTab()];
+  if (appState.user.role === 'IT_TECHNICIAN') {
+    tasks.push(loadRegisteredUsersForIT());
+  }
+  await Promise.all(tasks);
+}
+
+async function loadRegisteredUsersForIT() {
+  const tbody = document.getElementById('accounts-table-body');
+  if (!tbody) return;
+  try {
+    const res = await fetch(API + '/api/auth/users', { headers: authHeaders() });
+    const data = await res.json();
+    const users = data.users || [];
+    setText('accounts-count-badge', `${users.length} account${users.length === 1 ? '' : 's'}`);
+
+    const me = appState.user || {};
+    const amMainIt = Boolean(me.is_main_it);
+
+    if (!users.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No registered accounts found.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = users.map(u => {
+      const isMainTarget = Boolean(u.is_main_it);
+      const isSelf = u.user_id === me.user_id;
+      const isItTarget = u.role === 'IT_TECHNICIAN';
+
+      let actionHtml = '';
+      if (isMainTarget) {
+        actionHtml = '<span class="acct-protected-tag">Protected</span>';
+      } else if (isSelf) {
+        actionHtml = '<span class="acct-protected-tag">Current session</span>';
+      } else if (isItTarget && !amMainIt) {
+        actionHtml = '<span class="acct-protected-tag">Main IT only</span>';
+      } else {
+        const safeUser = encodeURIComponent(JSON.stringify({
+          user_id: u.user_id,
+          username: u.username,
+          full_name: u.full_name,
+          role: u.role,
+        }));
+        actionHtml = `<button class="btn btn-sm btn-danger" onclick="openDeleteAccountModal('${safeUser}')">Delete</button>`;
+      }
+
+      const roleBadge = isMainTarget
+        ? '<span class="badge critical">Main IT</span>'
+        : isItTarget
+          ? '<span class="badge warning">IT Tech</span>'
+          : '<span class="badge safe">Personnel</span>';
+
+      return `
+        <tr>
+          <td style="font-family:'Atkinson Hyperlegible Mono',monospace; font-weight:600;">${_escHtml(u.username)}</td>
+          <td>${_escHtml(u.full_name)}</td>
+          <td>${roleBadge}</td>
+          <td style="font-family:'Atkinson Hyperlegible Mono',monospace; font-size:12px;">${_escHtml(u.created_at || '—')}</td>
+          <td style="text-align:right;">${actionHtml}</td>
+        </tr>
+      `;
+    }).join('');
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Unable to load accounts.</td></tr>';
+  }
+}
+
+async function loadAccountLogsForTab() {
+  const tbody = document.getElementById('accounts-logs-body');
+  if (!tbody || !appState.user) return;
+  const isIt = appState.user.role === 'IT_TECHNICIAN';
+  setText('accounts-log-title', isIt ? 'Personnel & technician activity logs' : 'My activity logs');
+  setText(
+    'accounts-log-scope',
+    isIt
+      ? (appState.user.is_main_it ? 'Main IT · All staff & history' : 'IT Tech · All staff')
+      : 'Login, logout & password history'
+  );
+  try {
+    const url = isIt
+      ? `${API}/api/auth/activity-logs?scope=all&category=${encodeURIComponent(_acctLogCategory)}&limit=120`
+      : `${API}/api/auth/activity-logs?scope=mine&limit=60`;
+    const res = await fetch(url, { headers: authHeaders() });
+    const data = await res.json();
+    const logs = data.logs || [];
+
+    if (!logs.length) {
+      tbody.innerHTML = '<tr><td colspan="4" class="empty-state">No matching activity logs yet.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = logs.map(l => `
+      <tr>
+        <td style="font-family:'Atkinson Hyperlegible Mono',monospace; font-size:12px; white-space:nowrap;">${_escHtml(l.created_at)}</td>
+        <td style="font-family:'Atkinson Hyperlegible Mono',monospace; font-weight:600;">${_escHtml(l.actor)}</td>
+        <td>${_formatActivityBadge(l.action)}</td>
+        <td>${_escHtml(_formatActivityDetails(l))}</td>
+      </tr>
+    `).join('');
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="4" class="empty-state">Unable to load activity logs.</td></tr>';
+  }
+}
+
+// ── Two-Step Password-Confirmed Account Deletion Modal ─────
+function openDeleteAccountModal(encodedTarget) {
+  try {
+    _pendingDeleteTarget = JSON.parse(decodeURIComponent(encodedTarget));
+  } catch {
+    return;
+  }
+  setText('del-target-name', _pendingDeleteTarget.full_name || _pendingDeleteTarget.username);
+  setText('del-target-username', `@${_pendingDeleteTarget.username}`);
+  setText('del-target-username-2', `@${_pendingDeleteTarget.username}`);
+  setText('del-target-role', _formatRoleLabel(_pendingDeleteTarget.role, false));
+
+  const s1 = document.getElementById('del-step-1');
+  const s2 = document.getElementById('del-step-2');
+  const pw = document.getElementById('del-confirm-password');
+  const err = document.getElementById('del-error');
+  if (s1) s1.style.display = 'flex';
+  if (s2) s2.style.display = 'none';
+  if (pw) pw.value = '';
+  if (err) err.style.display = 'none';
+
+  const m = document.getElementById('delete-account-modal');
+  if (m) m.style.display = 'flex';
+}
+
+function proceedDeleteStep2() {
+  const s1 = document.getElementById('del-step-1');
+  const s2 = document.getElementById('del-step-2');
+  const err = document.getElementById('del-error');
+  if (s1) s1.style.display = 'none';
+  if (s2) s2.style.display = 'flex';
+  if (err) err.style.display = 'none';
+  document.getElementById('del-confirm-password')?.focus();
+}
+
+function backToDeleteStep1() {
+  const s1 = document.getElementById('del-step-1');
+  const s2 = document.getElementById('del-step-2');
+  const err = document.getElementById('del-error');
+  if (s1) s1.style.display = 'flex';
+  if (s2) s2.style.display = 'none';
+  if (err) err.style.display = 'none';
+}
+
+function closeDeleteAccountModal() {
+  _pendingDeleteTarget = null;
+  const m = document.getElementById('delete-account-modal');
+  if (m) m.style.display = 'none';
+}
+
+async function submitDeleteAccount() {
+  if (!_pendingDeleteTarget) return;
+  const password = document.getElementById('del-confirm-password')?.value || '';
+  const errEl = document.getElementById('del-error');
+  if (errEl) errEl.style.display = 'none';
+
+  if (!password) {
+    if (errEl) { errEl.textContent = 'Please enter your IT Technician password to confirm.'; errEl.style.display = 'block'; }
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API}/api/auth/users/${_pendingDeleteTarget.user_id}/delete`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ password }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      if (errEl) { errEl.textContent = data.detail || 'Account deletion failed.'; errEl.style.display = 'block'; }
+      return;
+    }
+    const deletedName = _pendingDeleteTarget.username;
+    closeDeleteAccountModal();
+    toast(`Deleted account @${deletedName} and recorded in activity logs.`, 'success');
+    await loadAccountsTabData();
+  } catch (e) {
+    if (errEl) { errEl.textContent = e.message; errEl.style.display = 'block'; }
+  }
 }

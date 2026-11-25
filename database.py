@@ -95,8 +95,35 @@ def init_db(db_path=DB_FILE):
                 (3, "Add RBAC users and persistent user_sessions tables for Personnel and IT Technician auth.")
             )
 
+        if current_version < 4:
+            _apply_migration_v4(cursor)
+            cursor.execute(
+                "INSERT INTO schema_migrations (version, description) VALUES (?, ?);",
+                (4, "Add is_main_it flag to users for Main IT Technician account deletion protection.")
+            )
+
     # Seed static campus topology and default staff accounts if tables are empty
     seed_static_data(db_path)
+
+
+def _apply_migration_v4(cursor):
+    """Migration V4: Mark the primary IT Technician account as protected Main IT."""
+    cursor.execute("PRAGMA table_info(users);")
+    cols = {row[1] for row in cursor.fetchall()}
+    if "is_main_it" not in cols:
+        cursor.execute(
+            "ALTER TABLE users ADD COLUMN is_main_it INTEGER NOT NULL DEFAULT 0 CHECK (is_main_it IN (0, 1));"
+        )
+    # Flag the seeded 'it.tech' account as Main IT Technician (or earliest IT_TECHNICIAN if renamed)
+    cursor.execute("UPDATE users SET is_main_it = 1 WHERE username = 'it.tech' AND role = 'IT_TECHNICIAN';")
+    cursor.execute("SELECT COUNT(*) FROM users WHERE is_main_it = 1;")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute(
+            """UPDATE users SET is_main_it = 1
+               WHERE user_id = (
+                   SELECT user_id FROM users WHERE role = 'IT_TECHNICIAN' ORDER BY user_id ASC LIMIT 1
+               );"""
+        )
 
 
 def _apply_migration_v3(cursor):
@@ -381,9 +408,10 @@ def seed_static_data(db_path=DB_FILE):
             ]
             for uname, fname, role, pw in defaults:
                 pw_hash, salt_hex = hash_password(pw)
+                is_main = 1 if (uname == "it.tech" and role == "IT_TECHNICIAN") else 0
                 cursor.execute(
-                    "INSERT INTO users (username, full_name, role, password_hash, salt) VALUES (?, ?, ?, ?, ?);",
-                    (uname, fname, role, pw_hash, salt_hex)
+                    "INSERT INTO users (username, full_name, role, password_hash, salt, is_main_it) VALUES (?, ?, ?, ?, ?, ?);",
+                    (uname, fname, role, pw_hash, salt_hex, is_main)
                 )
 
 
@@ -663,7 +691,7 @@ def authenticate_user(username: str, password: str, ttl_hours: int = 12, db_path
         )
         cursor.execute(
             "INSERT INTO system_audit_logs (action, actor, details) VALUES ('USER_LOGIN', ?, ?);",
-            (uname, json.dumps({"role": row["role"]}))
+            (uname, json.dumps({"role": row["role"], "full_name": row["full_name"]}))
         )
         return {
             "token": token,
@@ -673,6 +701,7 @@ def authenticate_user(username: str, password: str, ttl_hours: int = 12, db_path
                 "username": row["username"],
                 "full_name": row["full_name"],
                 "role": row["role"],
+                "is_main_it": bool(row["is_main_it"]),
             },
         }
 
@@ -684,7 +713,7 @@ def get_session_user(token: str | None, db_path=DB_FILE):
     with get_db_connection(db_path) as conn:
         cursor = conn.cursor()
         cursor.execute(
-            """SELECT u.user_id, u.username, u.full_name, u.role, s.expires_at
+            """SELECT u.user_id, u.username, u.full_name, u.role, u.is_main_it, s.expires_at
                FROM user_sessions s
                JOIN users u ON s.user_id = u.user_id
                WHERE s.token = ? AND u.is_active = 1;""",
@@ -701,24 +730,180 @@ def get_session_user(token: str | None, db_path=DB_FILE):
             "username": row["username"],
             "full_name": row["full_name"],
             "role": row["role"],
+            "is_main_it": bool(row["is_main_it"]),
         }
 
 
 def revoke_session(token: str | None, db_path=DB_FILE):
-    """Invalidate a session token on logout."""
+    """Invalidate a session token on logout and record a USER_LOGOUT audit log."""
     if not token:
         return
     with get_db_connection(db_path) as conn:
         cursor = conn.cursor()
+        cursor.execute(
+            """SELECT u.username, u.full_name, u.role
+               FROM user_sessions s
+               JOIN users u ON s.user_id = u.user_id
+               WHERE s.token = ?;""",
+            (token,)
+        )
+        row = cursor.fetchone()
         cursor.execute("DELETE FROM user_sessions WHERE token = ?;", (token,))
+        if row:
+            cursor.execute(
+                "INSERT INTO system_audit_logs (action, actor, details) VALUES ('USER_LOGOUT', ?, ?);",
+                (row["username"], json.dumps({"role": row["role"], "full_name": row["full_name"]}))
+            )
 
 
 def list_users(db_path=DB_FILE):
     """Return non-sensitive registered accounts for IT Technician management."""
     with get_db_connection(db_path) as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT user_id, username, full_name, role, is_active, created_at FROM users ORDER BY user_id ASC;")
-        return [dict(r) for r in cursor.fetchall()]
+        cursor.execute(
+            """SELECT user_id, username, full_name, role, is_main_it, is_active, created_at
+               FROM users
+               WHERE is_active = 1
+               ORDER BY is_main_it DESC, user_id ASC;"""
+        )
+        out = []
+        for r in cursor.fetchall():
+            d = dict(r)
+            d["is_main_it"] = bool(d["is_main_it"])
+            out.append(d)
+        return out
+
+
+def change_user_password(user_id: int, current_password: str, new_password: str, db_path=DB_FILE):
+    """Verify current password, rotate salted hash, and log PASSWORD_CHANGE."""
+    if len(new_password or "") < 6:
+        raise ValueError("New password must be at least 6 characters.")
+    if current_password == new_password:
+        raise ValueError("New password must be different from your current password.")
+
+    with get_db_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE user_id = ? AND is_active = 1;", (user_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise LookupError("Account not found.")
+
+        cand_hash, _ = hash_password(current_password, row["salt"])
+        if not hmac.compare_digest(cand_hash, row["password_hash"]):
+            raise PermissionError("Current password is incorrect.")
+
+        new_hash, new_salt = hash_password(new_password)
+        cursor.execute(
+            "UPDATE users SET password_hash = ?, salt = ? WHERE user_id = ?;",
+            (new_hash, new_salt, user_id)
+        )
+        cursor.execute(
+            "INSERT INTO system_audit_logs (action, actor, details) VALUES ('PASSWORD_CHANGE', ?, ?);",
+            (row["username"], json.dumps({"role": row["role"], "full_name": row["full_name"]}))
+        )
+        return {"username": row["username"], "role": row["role"]}
+
+
+def delete_user_account(actor_user_id: int, actor_password: str, target_user_id: int, db_path=DB_FILE):
+    """Delete an account after verifying the acting IT Technician's password and RBAC hierarchy."""
+    with get_db_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE user_id = ? AND is_active = 1;", (actor_user_id,))
+        actor = cursor.fetchone()
+        if not actor or actor["role"] != "IT_TECHNICIAN":
+            raise PermissionError("IT Technician privileges are required to delete accounts.")
+
+        cand_hash, _ = hash_password(actor_password or "", actor["salt"])
+        if not hmac.compare_digest(cand_hash, actor["password_hash"]):
+            raise PermissionError("Incorrect IT Technician password. Account deletion cancelled.")
+
+        cursor.execute("SELECT * FROM users WHERE user_id = ? AND is_active = 1;", (target_user_id,))
+        target = cursor.fetchone()
+        if not target:
+            raise LookupError("Target account not found.")
+
+        if target["is_main_it"]:
+            raise PermissionError("The Main IT Technician account is protected and cannot be deleted.")
+        if target["user_id"] == actor["user_id"]:
+            raise PermissionError("You cannot delete your own active account.")
+        if target["role"] == "IT_TECHNICIAN" and not actor["is_main_it"]:
+            raise PermissionError("Only the Main IT Technician can delete other IT Technician accounts.")
+
+        cursor.execute("DELETE FROM user_sessions WHERE user_id = ?;", (target_user_id,))
+        cursor.execute("DELETE FROM users WHERE user_id = ?;", (target_user_id,))
+        cursor.execute(
+            "INSERT INTO system_audit_logs (action, actor, details) VALUES ('USER_DELETE', ?, ?);",
+            (
+                actor["username"],
+                json.dumps({
+                    "actor_role": actor["role"],
+                    "actor_full_name": actor["full_name"],
+                    "actor_is_main_it": bool(actor["is_main_it"]),
+                    "deleted_user_id": target["user_id"],
+                    "deleted_username": target["username"],
+                    "deleted_full_name": target["full_name"],
+                    "deleted_role": target["role"],
+                }),
+            ),
+        )
+        return {
+            "deleted_user_id": target["user_id"],
+            "deleted_username": target["username"],
+            "deleted_full_name": target["full_name"],
+            "deleted_role": target["role"],
+            "deleted_by": actor["username"],
+        }
+
+
+def get_account_activity_logs(requesting_user: dict, scope: str = "all", category: str = "all", limit: int = 150, db_path=DB_FILE):
+    """Return role-scoped account activity logs from system_audit_logs.
+
+    - PERSONNEL: strictly restricted to their own USER_LOGIN, USER_LOGOUT, and PASSWORD_CHANGE logs.
+    - IT_TECHNICIAN: can view all Personnel and IT Technician account logs (or scope='mine' for own logs),
+      including USER_LOGIN, USER_LOGOUT, PASSWORD_CHANGE, USER_REGISTER, and USER_DELETE.
+    """
+    role = requesting_user.get("role")
+    uname = requesting_user.get("username", "").lower()
+
+    if role != "IT_TECHNICIAN":
+        actions = ("USER_LOGIN", "USER_LOGOUT", "PASSWORD_CHANGE")
+        where_actor = "AND LOWER(actor) = ?"
+        params = [uname]
+    else:
+        cat_map = {
+            "auth": ("USER_LOGIN", "USER_LOGOUT"),
+            "password": ("PASSWORD_CHANGE",),
+            "delete": ("USER_DELETE",),
+            "register": ("USER_REGISTER",),
+        }
+        actions = cat_map.get(category, ("USER_LOGIN", "USER_LOGOUT", "PASSWORD_CHANGE", "USER_REGISTER", "USER_DELETE"))
+        if scope == "mine":
+            where_actor = "AND LOWER(actor) = ?"
+            params = [uname]
+        else:
+            where_actor = ""
+            params = []
+
+    placeholders = ",".join("?" for _ in actions)
+    query = f"""
+        SELECT log_id, action, actor, details, created_at
+        FROM system_audit_logs
+        WHERE action IN ({placeholders}) {where_actor}
+        ORDER BY log_id DESC
+        LIMIT ?;
+    """
+    with get_db_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(query, (*actions, *params, int(limit)))
+        rows = []
+        for r in cursor.fetchall():
+            d = dict(r)
+            try:
+                d["details_obj"] = json.loads(d["details"]) if d["details"] else {}
+            except Exception:
+                d["details_obj"] = {}
+            rows.append(d)
+        return rows
 
 
 def log_audit(action, actor="SYSTEM", details=None, ip_address=None, db_path=DB_FILE):

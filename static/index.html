@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SENTINEL · Sto. Niño SHS campus safety</title>
-  <link rel="stylesheet" href="/static/style.css?v=7.6" />
+  <link rel="stylesheet" href="/static/style.css?v=8.4" />
 </head>
 <body data-auth="public">
 <div class="app-shell">
@@ -170,6 +170,19 @@
         <div id="facility-tags" class="tag-list"></div>
       </div>
 
+      <div class="sb-section staff-only">
+        <div class="sb-label-row">
+          <span class="sb-title">Account</span>
+        </div>
+        <button id="sb-btn-accounts" class="btn sb-nav-btn" onclick="switchTab('accounts')" title="Password security, accounts, and activity logs">
+          <svg class="icon icon-sm" viewBox="0 0 24 24">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+          Accounts &amp; logs
+        </button>
+      </div>
+
     </aside>
 
     <main class="content-area">
@@ -181,7 +194,16 @@
           <span class="eb-title" id="eb-title">Emergency active</span>
           <span class="eb-sub" id="eb-sub">Evacuation routes updated for all 36 classrooms.</span>
         </div>
-        <button class="btn btn-primary staff-only" onclick="resolveEmergency()">Mark threat resolved</button>
+        <div class="eb-right">
+          <button id="emergency-qr-chip" class="qr-911-chip" onclick="openQr911Modal()" style="display:none;" title="Scan or click to call 911">
+            <img src="/static/qr_911.svg" alt="QR code to call 911" class="qr-911-thumb" />
+            <span class="qr-911-chip-text">
+              <strong>Call 911</strong>
+              <span>Scan to dial</span>
+            </span>
+          </button>
+          <button class="btn btn-primary staff-only" onclick="resolveEmergency()">Mark threat resolved</button>
+        </div>
       </div>
 
       <!-- TAB: Map -->
@@ -493,6 +515,106 @@
 
       </div><!-- /tab-hardware -->
 
+      <!-- TAB: Accounts & activity logs (Unified for Personnel & IT Technician) -->
+      <div id="tab-accounts" class="tab-panel">
+        <div class="pill-toolbar">
+          <div class="pill-group it-only">
+            <button class="filter-pill active" id="acclog-f-all" onclick="filterAccountLogs('all')">All activity</button>
+            <button class="filter-pill" id="acclog-f-auth" onclick="filterAccountLogs('auth')">Logins &amp; logouts</button>
+            <button class="filter-pill" id="acclog-f-password" onclick="filterAccountLogs('password')">Password changes</button>
+            <button class="filter-pill" id="acclog-f-delete" onclick="filterAccountLogs('delete')">Deletions</button>
+          </div>
+          <div class="toolbar-actions" style="margin-left:auto;">
+            <button class="btn btn-primary" onclick="loadAccountsTabData()">Refresh</button>
+          </div>
+        </div>
+
+        <div class="accounts-stack-grid">
+          <!-- My account & password (All signed-in staff) -->
+          <div class="panel-card">
+            <div class="panel-card-header">
+              <span class="panel-card-title">My account &amp; security</span>
+              <span class="badge safe" id="acct-prof-role">Personnel</span>
+            </div>
+            <div style="padding:16px; display:flex; flex-direction:column; gap:14px;">
+              <div class="account-profile-strip">
+                <div>
+                  <div class="account-profile-name" id="acct-prof-name">User</div>
+                  <div class="account-profile-meta" id="acct-prof-username">@username</div>
+                </div>
+                <span class="field-hint" style="margin:0;">Update your password if someone may have seen your credentials.</span>
+              </div>
+              <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:10px;">
+                <div>
+                  <label class="field-label" for="cp-current">Current password</label>
+                  <input id="cp-current" type="password" class="text-input" placeholder="Current password" autocomplete="current-password" />
+                </div>
+                <div>
+                  <label class="field-label" for="cp-new">New password</label>
+                  <input id="cp-new" type="password" class="text-input" placeholder="At least 6 characters" autocomplete="new-password" />
+                </div>
+                <div>
+                  <label class="field-label" for="cp-confirm">Confirm new password</label>
+                  <input id="cp-confirm" type="password" class="text-input" placeholder="Re-enter new password" autocomplete="new-password" />
+                </div>
+              </div>
+              <div id="cp-error" class="auth-error" style="display:none;"></div>
+              <div id="cp-success" class="auth-success" style="display:none;"></div>
+              <div style="display:flex; justify-content:flex-end;">
+                <button id="btn-submit-cp" class="btn btn-primary" onclick="submitChangePassword()">Update password</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Registered staff accounts (IT Technician only) -->
+          <div class="panel-card it-only">
+            <div class="panel-card-header">
+              <span class="panel-card-title">Registered staff accounts</span>
+              <span class="badge safe" id="accounts-count-badge">0 accounts</span>
+            </div>
+            <div class="table-scroll">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Username</th>
+                    <th>Full name</th>
+                    <th>Role</th>
+                    <th>Created</th>
+                    <th style="text-align:right;">Access</th>
+                  </tr>
+                </thead>
+                <tbody id="accounts-table-body">
+                  <tr><td colspan="5" class="empty-state">Loading accounts…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Activity logs (Personnel: own logs only; IT Technician: all staff & deletion history) -->
+          <div class="panel-card">
+            <div class="panel-card-header">
+              <span class="panel-card-title" id="accounts-log-title">Activity logs</span>
+              <span class="hw-chip-mono" id="accounts-log-scope">Own history</span>
+            </div>
+            <div class="table-scroll">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Date &amp; time</th>
+                    <th>Account</th>
+                    <th>Event</th>
+                    <th>Details</th>
+                  </tr>
+                </thead>
+                <tbody id="accounts-logs-body">
+                  <tr><td colspan="4" class="empty-state">Loading activity logs…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div><!-- /tab-accounts -->
+
     </main>
   </div>
 </div>
@@ -647,7 +769,62 @@
   </div>
 </div>
 
+<!-- Modal: Two-step password-confirmed account deletion (IT Technician only) -->
+<div id="delete-account-modal" class="modal-backdrop" style="display:none;">
+  <div class="modal-card" style="max-width:420px;">
+    <div class="modal-head">
+      <div class="modal-title" id="del-modal-title">Delete account</div>
+      <button class="icon-btn-rail" onclick="closeDeleteAccountModal()" title="Close">&times;</button>
+    </div>
+
+    <!-- Step 1: Confirm deletion -->
+    <div id="del-step-1" style="display:flex; flex-direction:column; gap:14px;">
+      <div class="del-warning-box">
+        Delete this account: <strong id="del-target-name">User</strong> (<code id="del-target-username">@user</code>, <span id="del-target-role">Personnel</span>)?
+        <div class="field-hint" style="margin-top:6px;">Their access will be revoked immediately and this deletion will be logged in the database.</div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" onclick="closeDeleteAccountModal()">Cancel</button>
+        <button id="btn-del-step1-yes" class="btn btn-danger" onclick="proceedDeleteStep2()">Yes, continue</button>
+      </div>
+    </div>
+
+    <!-- Step 2: IT Technician password confirmation -->
+    <div id="del-step-2" style="display:none; flex-direction:column; gap:12px;">
+      <div class="field-hint" style="margin:0;">Enter your IT Technician password to complete deleting <strong id="del-target-username-2">@user</strong>.</div>
+      <div>
+        <label class="field-label" for="del-confirm-password">Your IT Technician password</label>
+        <input id="del-confirm-password" type="password" class="text-input" placeholder="Enter your password" autocomplete="current-password" />
+      </div>
+      <div id="del-error" class="auth-error" style="display:none;"></div>
+      <div class="modal-actions">
+        <button class="btn" onclick="backToDeleteStep1()">Back</button>
+        <button id="btn-del-confirm" class="btn btn-danger" onclick="submitDeleteAccount()">Confirm delete</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Emergency 911 Call QR (Enlarged scannable view) -->
+<div id="qr-911-modal" class="modal-backdrop" style="display:none;">
+  <div class="modal-card" style="max-width:360px; text-align:center;">
+    <div class="modal-head">
+      <div class="modal-title" style="color:var(--c-red);">Emergency 911</div>
+      <button class="icon-btn-rail" onclick="closeQr911Modal()" title="Close">&times;</button>
+    </div>
+    <div class="qr-911-modal-box">
+      <img src="/static/qr_911.svg" alt="Scan to call 911" class="qr-911-large" />
+    </div>
+    <div style="font-size:var(--fs-base); font-weight:700; color:var(--c-navy);">Scan with your phone camera to dial 911</div>
+    <div class="field-hint" style="margin:-8px 0 4px;">Point any iPhone or Android camera at this code to prompt an immediate call to 911.</div>
+    <div style="display:flex; gap:10px; justify-content:center;">
+      <a href="tel:911" class="btn btn-danger" style="flex:1; text-decoration:none;">Call 911 now</a>
+      <button class="btn" onclick="closeQr911Modal()">Close</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast-container"></div>
-<script src="/static/app.js?v=7.6"></script>
+<script src="/static/app.js?v=8.3"></script>
 </body>
 </html>
