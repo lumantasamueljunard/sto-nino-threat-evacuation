@@ -365,6 +365,7 @@ function closeQr911Modal() {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     closeQr911Modal();
+    closeResolveModal();
     closeDeleteAccountModal();
     closeAuthModal();
     closeUploadModal();
@@ -563,13 +564,30 @@ async function resetAll() {
   await refresh();
 }
 
-async function resolveEmergency() {
+function resolveEmergency() {
+  const m = document.getElementById('resolve-modal');
+  const inp = document.getElementById('resolve-notes-input');
+  if (inp && !inp.value.trim()) {
+    inp.value = 'Threat apprehended and evacuation secured by authorized personnel.';
+  }
+  if (m) m.style.display = 'flex';
+}
+
+function closeResolveModal() {
+  const m = document.getElementById('resolve-modal');
+  if (m) m.style.display = 'none';
+}
+
+async function confirmResolveEmergency() {
+  const notes = document.getElementById('resolve-notes-input')?.value.trim()
+    || 'Threat apprehended and evacuation secured by authorized personnel.';
+  closeResolveModal();
   const res = await apiFetch('/api/incidents/resolve', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      notes: 'Threat apprehended and evacuation secured by authorized personnel.',
-      resolved_by: 'DRRM_OFFICER',
+      notes,
+      resolved_by: appState.user?.username || 'DRRM_OFFICER',
     }),
   });
   if (res?.ok) {
@@ -1514,7 +1532,6 @@ function renderHardwareTwin() {
   // ESP32 Edge Acoustic Sensor & Link Telemetry (GPIO 34 / Wi-Fi RSSI)
   const acVal = Number(dev.acoustic_sim ?? 18.0);
   const pct = Math.min(100, Math.max(0, acVal));
-  setText('hw-fw-badge', dev.firmware || 'SENTINEL-GW-v2.1');
   setText('hw-acoustic-val', `${acVal.toFixed(1)} dB-idx`);
   setText('hw-rssi-val', dev.rssi != null ? `${dev.rssi} dBm` : '— dBm');
   const acBar = document.getElementById('hw-acoustic-bar');
@@ -1564,29 +1581,6 @@ async function syncHardwareNow() {
   const res = await apiFetch('/api/hardware/sync', { method: 'POST' });
   if (res?.ok) {
     toast('Synced live campus state to ESP32 MQTT topic', 'success');
-    await refresh();
-  }
-}
-
-async function simulateHardwareEdgeTrigger(action) {
-  const res = await apiFetch('/api/hardware/simulate-edge', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      action,
-      target_device: 'TPB-F1-CAM-L',
-      acoustic: 88.0,
-      pose: 76.0,
-      object: 85.0,
-    }),
-  });
-  if (res?.ok) {
-    toast(
-      action === 'RESET'
-        ? 'Hardware Reset button simulated — Campus All Clear'
-        : 'ESP32 Break-Glass trigger simulated on TPB-F1-CAM-L!',
-      action === 'RESET' ? 'success' : 'critical'
-    );
     await refresh();
   }
 }

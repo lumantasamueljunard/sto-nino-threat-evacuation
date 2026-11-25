@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SENTINEL · Sto. Niño SHS campus safety</title>
-  <link rel="stylesheet" href="/static/style.css?v=8.4" />
+  <link rel="stylesheet" href="/static/style.css?v=8.6" />
 </head>
 <body data-auth="public">
 <div class="app-shell">
@@ -437,13 +437,10 @@
               <span class="status-beacon warning" id="hw-node-dot" style="width:6px;height:6px;"></span>
               <span id="hw-node-text">ESP32: standby</span>
             </span>
-            <span class="hw-chip-mono" id="hw-topic-label">stonino/campus/state</span>
           </div>
 
           <div class="toolbar-actions">
             <button class="btn btn-primary" onclick="syncHardwareNow()">Sync now</button>
-            <button class="btn" onclick="simulateHardwareEdgeTrigger('TRIGGER')">Simulate panic button</button>
-            <button class="btn" onclick="simulateHardwareEdgeTrigger('RESET')">Reset device</button>
           </div>
         </div>
 
@@ -470,7 +467,6 @@
           <div class="panel-card">
             <div class="panel-card-header">
               <span class="panel-card-title">Sound sensor and link</span>
-              <span class="hw-chip-mono" id="hw-fw-badge">SENTINEL-GW-v2.1</span>
             </div>
             <div class="hw-card-body hw-sensor-body">
               <div class="acoustic-meter-row">
@@ -824,7 +820,29 @@
   </div>
 </div>
 
+<!-- Modal: Confirm threat resolved (prevents accidental stand-down) -->
+<div id="resolve-modal" class="modal-backdrop" style="display:none;">
+  <div class="modal-card" style="max-width:440px;">
+    <div class="modal-head">
+      <div class="modal-title">Confirm threat resolved</div>
+      <button class="icon-btn-rail" onclick="closeResolveModal()" title="Close">&times;</button>
+    </div>
+    <div class="del-warning-box" style="background:var(--c-surface-2); border-color:var(--c-border-str);">
+      Are you sure the threat has been apprehended and all campus zones are safe?
+      <div class="field-hint" style="margin-top:6px;">This will immediately stand down evacuation alerts, clear active threats, and reset the ESP32 alarm to normal.</div>
+    </div>
+    <div>
+      <label class="field-label" for="resolve-notes-input">Resolution note (saved to incident log)</label>
+      <input id="resolve-notes-input" type="text" class="text-input" value="Threat apprehended and evacuation secured by authorized personnel." />
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeResolveModal()">Cancel</button>
+      <button id="btn-confirm-resolve" class="btn btn-primary" onclick="confirmResolveEmergency()">Yes, mark resolved</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast-container"></div>
-<script src="/static/app.js?v=8.3"></script>
+<script src="/static/app.js?v=8.6"></script>
 </body>
 </html>
