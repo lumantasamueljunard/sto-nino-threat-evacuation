@@ -25,6 +25,9 @@ let appState = {
   activeTab: 'map',
   mapView: 'campus',
   camFilter: 'outside',
+  prevGlobalStatus: null,
+  resolvedBannerUntil: 0,
+  resolvedBannerTimer: null,
 };
 
 const CANONICAL_DEVICES = [
@@ -199,12 +202,12 @@ function populateScenarioDropdown(scenarios) {
   const sel = document.getElementById('sb-scenario-select');
   if (!sel) return;
   const labels = {
-    'all_clear': 'Normal — All Clear',
-    'Gate-W Threat (Reroute to Gate-NE)': 'Drill: Gate-W Threat -> Reroute NE',
-    'Gate-NE Threat (Reroute to Gate-W)': 'Drill: Gate-NE Threat -> Reroute W',
-    'TPB Floor 1 Indoor Threat': 'Drill: TPB Floor 1 Indoor Threat',
-    'AB Floor 2 Indoor Threat': 'Drill: AB Floor 2 Indoor Threat',
-    'Corridor C2 Caution Zone': 'Drill: Corridor Caution Zone',
+    'all_clear': 'Normal (all clear)',
+    'Gate-W Threat (Reroute to Gate-NE)': 'Drill: West gate threat (use NE)',
+    'Gate-NE Threat (Reroute to Gate-W)': 'Drill: Northeast gate threat (use W)',
+    'TPB Floor 1 Indoor Threat': 'Drill: Tech Pro Floor 1 threat',
+    'AB Floor 2 Indoor Threat': 'Drill: Academic Floor 2 threat',
+    'Corridor C2 Caution Zone': 'Drill: Corridor caution zone',
   };
   sel.innerHTML = scenarios.map(s => `<option value="${s}">${labels[s] || s}</option>`).join('');
 }
@@ -220,8 +223,8 @@ function populateRoomDropdowns(rooms) {
     'Laboratory Building (LB)':rooms.filter(r => r.startsWith('LB-')),
   };
 
-  let html = '<option value="">Select classroom (36 rooms)…</option>';
-  let blockHtml = '<option value="">+ Unavailable Classroom…</option>';
+  let html = '<option value="">Choose a classroom</option>';
+  let blockHtml = '<option value="">Close a classroom</option>';
 
   for (const [grp, list] of Object.entries(groups)) {
     html += `<optgroup label="${grp}">${list.map(r => `<option value="${r}">${r}</option>`).join('')}</optgroup>`;
@@ -241,14 +244,14 @@ function populateHazardDropdowns() {
   ];
 
   if (corrSel) {
-    let html = '<option value="">+ Unavailable Corridor…</option>';
+    let html = '<option value="">Close a corridor</option>';
     bldgs.forEach(b => {
       let opts = '';
       for (let f = 1; f <= b.floors; f++) {
-        opts += `<option value="${b.code}-F${f}-CORRIDOR">${b.code}-F${f}-CORRIDOR (Entire Floor ${f} — All Rooms)</option>`;
+        opts += `<option value="${b.code}-F${f}-CORRIDOR">${b.code}-F${f}-CORRIDOR (whole Floor ${f})</option>`;
         for (let c = 0; c <= b.rpf; c++) {
           const id = `${b.code}-F${f}-C${c}`;
-          opts += `<option value="${id}">${id} (Floor ${f} Seg ${c})</option>`;
+          opts += `<option value="${id}">${id} (Floor ${f}, section ${c})</option>`;
         }
       }
       html += `<optgroup label="${b.name}">${opts}</optgroup>`;
@@ -257,7 +260,7 @@ function populateHazardDropdowns() {
   }
 
   if (stairSel) {
-    let html = '<option value="">+ Unavailable Stairwell…</option>';
+    let html = '<option value="">Close a stairwell</option>';
     bldgs.forEach(b => {
       let opts = '';
       for (let f = 1; f <= b.floors; f++) {
@@ -281,7 +284,12 @@ function renderAll() {
   updateBuildingBadges(snapshot);
 
   const selectedRoom = document.getElementById('sb-room-select')?.value;
-  if (selectedRoom) updateRoomInspectorCard(selectedRoom);
+  if (selectedRoom) {
+    updateRoomInspectorCard(selectedRoom);
+  } else {
+    const ins = document.getElementById('inspector-result');
+    if (ins) ins.style.display = 'none';
+  }
   updatePublicThreatBar(snapshot);
   updateOccupantGuidance();
 
@@ -315,24 +323,24 @@ function updateTopbarStatus(status, snapshot) {
   if (lvl === 'CRITICAL') {
     pill.classList.add('critical');
     beacon.classList.add('critical');
-    text.textContent = 'EMERGENCY · EVACUATE';
+    text.textContent = 'Emergency: evacuate';
     banner.className = 'emergency-banner visible';
     ebBeacon.className = 'status-beacon critical';
-    ebTitle.textContent = 'CRITICAL THREAT ACTIVE';
+    ebTitle.textContent = 'Critical threat active';
     const safeCnt = snapshot.counts?.available ?? snapshot.counts?.['MODELED_ROUTE_AVAILABLE'] ?? 0;
     const holdCnt = snapshot.counts?.hold ?? snapshot.counts?.['HOLD_FOR_AUTHORIZED_GUIDANCE'] ?? 0;
     const blkCnt  = snapshot.counts?.no_route ?? snapshot.counts?.['NO_CONFIRMED_ROUTE'] ?? 0;
-    ebSub.textContent = `${safeCnt} rooms evacuating · ${holdCnt} holding · ${blkCnt} compromised.`;
+    ebSub.textContent = `${safeCnt} rooms evacuating, ${holdCnt} holding in place, ${blkCnt} blocked.`;
   } else if (lvl === 'WARNING') {
     pill.classList.add('warning');
     beacon.classList.add('warning');
-    text.textContent = 'CAUTION · REROUTING';
+    text.textContent = 'Caution: rerouting';
     banner.className = 'emergency-banner warning visible';
     ebBeacon.className = 'status-beacon warning';
-    ebTitle.textContent = 'ELEVATED CAUTION / OVERRIDE ACTIVE';
-    ebSub.textContent = 'Dynamic rerouting engaged around restricted zones or gates.';
+    ebTitle.textContent = 'Caution active';
+    ebSub.textContent = 'Routes adjusted around restricted zones or gates.';
   } else {
-    text.textContent = 'ALL CLEAR · SECURE';
+    text.textContent = 'All clear';
     banner.className = 'emergency-banner';
   }
 }
@@ -446,14 +454,14 @@ function updateRoomInspectorCard(roomId) {
   card.className = `inspector-card ${isSafe ? '' : isUnavail ? 'unavail' : isHold ? 'warning' : 'critical'}`;
   setText(
     'ins-status-label',
-    isSafe ? 'SAFE EVACUATION ROUTE'
-      : isUnavail ? 'FACILITY UNAVAILABLE (GRAY X)'
-      : isHold ? 'HOLD IN PLACE (ISOLATED)'
-      : 'THREAT AREA / BLOCKED'
+    isSafe ? 'Safe route available'
+      : isUnavail ? 'Closed for maintenance'
+      : isHold ? 'Hold in place'
+      : 'Threat area, blocked'
   );
-  setText('ins-gate', r.gate || 'NONE');
-  setText('ins-door', r.door_label || 'NONE');
-  setText('ins-steps', r.route?.length ? `${r.route.length} graph nodes (Cost ${r.cost})` : (r.reason || 'No route available'));
+  setText('ins-gate', r.gate || 'None');
+  setText('ins-door', r.door_label || 'None');
+  setText('ins-steps', r.route?.length ? `${r.route.length} steps (cost ${r.cost})` : (r.reason || 'No route available'));
 }
 
 async function toggleGate(gateId) {
@@ -533,7 +541,8 @@ async function resolveEmergency() {
     }),
   });
   if (res?.ok) {
-    toast('Campus SECURED — Active incidents logged as RESOLVED & ESP32 stood down.', 'success');
+    showResolvedThreatBanner(6000);
+    toast('Campus secured. Threat logged as resolved and ESP32 stood down.', 'success');
     await refresh();
   }
 }
@@ -563,33 +572,35 @@ function renderCampusMap(snapshot, status) {
   const blockedSet = new Set(snapshot.blocked || []);
 
   const gateCoords = {
-    'GATE-W':  { x: 195, y: 405, label: 'GATE-W · West Exit' },
-    'GATE-NE': { x: 778, y: 146, label: 'GATE-NE · Northeast Exit' },
+    'GATE-W':  { x: 202, y: 398, label: 'GATE-W · West Exit' },
+    'GATE-NE': { x: 776, y: 150, label: 'GATE-NE · Northeast Exit' },
   };
 
+  // Paved-walkway outdoor routes traced strictly along concrete sidewalks & gate aprons
+  // (avoids cutting across buildings, hedges, central grass lawn, or perimeter trees)
   const bldConfigs = [
     {
       code: 'TPB', title: 'TECH PRO (TPB)',
-      cx: 485, cy: 235, w: 185, h: 66,
+      cx: 455, cy: 232, w: 176, h: 62,
       paths: {
-        'GATE-W':  [[390, 250], [285, 315], [195, 405]],
-        'GATE-NE': [[580, 225], [685, 185], [778, 146]],
+        'GATE-W':  [[442, 354], [334, 394], [258, 386], [202, 398]],
+        'GATE-NE': [[552, 304], [686, 244], [722, 212], [750, 174], [776, 150]],
       }
     },
     {
       code: 'AB', title: 'ACADEMIC (AB)',
-      cx: 745, cy: 430, w: 185, h: 66,
+      cx: 734, cy: 388, w: 176, h: 62,
       paths: {
-        'GATE-W':  [[650, 435], [460, 425], [195, 405]],
-        'GATE-NE': [[760, 395], [772, 275], [778, 146]],
+        'GATE-W':  [[638, 355], [602, 286], [492, 336], [355, 390], [258, 390], [202, 398]],
+        'GATE-NE': [[660, 292], [714, 224], [750, 174], [776, 150]],
       }
     },
     {
       code: 'LB', title: 'LABORATORY (LB)',
-      cx: 415, cy: 525, w: 185, h: 66,
+      cx: 384, cy: 492, w: 176, h: 62,
       paths: {
-        'GATE-W':  [[322, 515], [248, 462], [195, 405]],
-        'GATE-NE': [[508, 510], [645, 345], [778, 146]],
+        'GATE-W':  [[428, 440], [396, 394], [320, 398], [258, 392], [202, 398]],
+        'GATE-NE': [[428, 440], [396, 382], [498, 340], [608, 290], [716, 216], [750, 174], [776, 150]],
       }
     }
   ];
@@ -623,23 +634,21 @@ function renderCampusMap(snapshot, status) {
       bCol = '#64748b';
     }
 
-    // Draw Evacuation Flow Arrow when Emergency/Warning or Gate Override is active
-    if (isEmergency && safeRoutes.length > 0) {
-      const gateCounts = {};
-      safeRoutes.forEach(([_, r]) => {
-        if (r.gate) gateCounts[r.gate] = (gateCounts[r.gate] || 0) + 1;
+    // Draw Evacuation Flow Arrow(s) when Emergency/Warning or Gate Override is active
+    if ((isEmergency || appState.unavailableGates.length > 0) && safeRoutes.length > 0) {
+      const activeGates = [...new Set(safeRoutes.map(([_, r]) => r.gate).filter(Boolean))];
+      activeGates.forEach(targetGate => {
+        if (b.paths[targetGate]) {
+          const dStr = shortenPathEnd(b.paths[targetGate], 28);
+          pathsSvg += `
+            <path d="${dStr}" fill="none" stroke="#047857" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" opacity="0.28"/>
+            <path d="${dStr}" fill="none" stroke="#10b981" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"
+              stroke-dasharray="12,8" marker-end="url(#campus-arr-safe)">
+              <animate attributeName="stroke-dashoffset" from="40" to="0" dur="0.9s" repeatCount="indefinite"/>
+            </path>
+          `;
+        }
       });
-      const targetGate = Object.entries(gateCounts).sort((a, b) => b[1] - a[1])[0]?.[0];
-      if (targetGate && b.paths[targetGate]) {
-        const dStr = shortenPathEnd(b.paths[targetGate], 30);
-        pathsSvg += `
-          <path d="${dStr}" fill="none" stroke="#047857" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" opacity="0.28"/>
-          <path d="${dStr}" fill="none" stroke="#10b981" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"
-            stroke-dasharray="12,8" marker-end="url(#campus-arr-safe)">
-            <animate attributeName="stroke-dashoffset" from="40" to="0" dur="0.9s" repeatCount="indefinite"/>
-          </path>
-        `;
-      }
     }
 
     const bx = b.cx - b.w / 2;
@@ -648,11 +657,11 @@ function renderCampusMap(snapshot, status) {
       <g style="cursor:pointer; pointer-events:all;" onclick="switchMapView('${b.code.toLowerCase()}')">
         <rect x="${bx}" y="${by}" width="${b.w}" height="${b.h}" rx="12"
           fill="rgba(15, 23, 42, 0.92)" stroke="${bCol}" stroke-width="3"/>
-        <text x="${b.cx}" y="${by + 26}" text-anchor="middle" fill="#ffffff"
-          font-size="13" font-weight="800" font-family="'Inter', sans-serif">${b.title}</text>
-        <rect x="${b.cx - 68}" y="${by + 35}" width="136" height="21" rx="10" fill="${bCol}"/>
-        <text x="${b.cx}" y="${by + 49}" text-anchor="middle" fill="#ffffff"
-          font-size="10.5" font-weight="800" font-family="'JetBrains Mono', monospace">${bStatusText}</text>
+        <text x="${b.cx}" y="${by + 25}" text-anchor="middle" fill="#ffffff"
+          font-size="12.5" font-weight="800" font-family="'Atkinson Hyperlegible Next', sans-serif">${b.title}</text>
+        <rect x="${b.cx - 66}" y="${by + 33}" width="132" height="21" rx="10" fill="${bCol}"/>
+        <text x="${b.cx}" y="${by + 47}" text-anchor="middle" fill="#ffffff"
+          font-size="10.5" font-weight="800" font-family="'Atkinson Hyperlegible Mono', monospace">${bStatusText}</text>
       </g>
     `;
   });
@@ -669,11 +678,11 @@ function renderCampusMap(snapshot, status) {
         <circle cx="${g.x}" cy="${g.y}" r="28" fill="${gCol}" opacity="0.22"/>
         <circle cx="${g.x}" cy="${g.y}" r="21" fill="#0f172a" stroke="${gCol}" stroke-width="3.5"/>
         <text x="${g.x}" y="${g.y + 4}" text-anchor="middle" fill="#ffffff"
-          font-size="10.5" font-weight="800" font-family="'JetBrains Mono', monospace">${gId === 'GATE-W' ? 'W' : 'NE'}</text>
+          font-size="10.5" font-weight="800" font-family="'Atkinson Hyperlegible Mono', monospace">${gId === 'GATE-W' ? 'W' : 'NE'}</text>
         <rect x="${g.x - 66}" y="${g.y + 27}" width="132" height="22" rx="11"
           fill="#0f172a" stroke="${gCol}" stroke-width="2"/>
         <text x="${g.x}" y="${g.y + 42}" text-anchor="middle" fill="#ffffff"
-          font-size="10.5" font-weight="800" font-family="'JetBrains Mono', monospace">${gTag}</text>
+          font-size="10.5" font-weight="800" font-family="'Atkinson Hyperlegible Mono', monospace">${gTag}</text>
       </g>
     `;
   }
@@ -690,32 +699,49 @@ function renderCampusMap(snapshot, status) {
   `;
 }
 
-// ── Render Building Floor Blueprints (Sharp Non-Cut Arrows) ──
+// ── Render Building Floor Blueprints (Door-Aligned Non-Cut Arrows) ──
 function renderBuildingFloors(bKey, snapshot) {
+  // Exact native pixel dimensions match b1_floor.png (1024x502), b2_floor.png (1024x523), b3_floor.png (1024x436)
   const bMap = {
-    tpb: { code: 'TPB', num: 1, name: 'Tech Pro Building', floors: 4, rpf: 5, img: '/static/img/b1_floor.png', imgH: 455 },
-    ab:  { code: 'AB',  num: 2, name: 'Academic Building', floors: 4, rpf: 3, img: '/static/img/b2_floor.png', imgH: 455 },
-    lb:  { code: 'LB',  num: 3, name: 'Laboratory Building', floors: 2, rpf: 2, img: '/static/img/b3_floor.png', imgH: 400 },
+    tpb: {
+      code: 'TPB', num: 1, name: 'Tech Pro Building', floors: 4, rpf: 5,
+      img: '/static/img/b1_floor.png', imgH: 502,
+      stairLBox: { x: 70, y: 58, w: 72, h: 246 },
+      stairRBox: { x: 875, y: 58, w: 73, h: 246 },
+    },
+    ab: {
+      code: 'AB', num: 2, name: 'Academic Building', floors: 4, rpf: 3,
+      img: '/static/img/b2_floor.png', imgH: 523,
+      stairLBox: { x: 72, y: 60, w: 73, h: 248 },
+      stairRBox: { x: 875, y: 60, w: 73, h: 248 },
+    },
+    lb: {
+      code: 'LB', num: 3, name: 'Laboratory Building', floors: 2, rpf: 2,
+      img: '/static/img/b3_floor.png', imgH: 436,
+      stairLBox: { x: 74, y: 50, w: 90, h: 250 },
+      stairRBox: { x: 882, y: 50, w: 86, h: 250 },
+    },
   };
   const cfg = bMap[bKey] || bMap.tpb;
-  const { code: bCode, num: bNum, name: bName, floors, rpf: roomsPerFloor, img: bImg, imgH } = cfg;
+  const { code: bCode, num: bNum, name: bName, floors, rpf: roomsPerFloor, img: bImg, imgH, stairLBox, stairRBox } = cfg;
 
+  // Measured exact doorway openings (dlX / drX both pass cleanly inside the drawn open doorway)
   const roomBoxes = {
     TPB: {
-      1: { x: 148, y: 58, w: 148, h: 242, dlX: 185, drX: 262, doorY: 298, corrY: 356, stairLX: 128, stairRX: 882 },
-      2: { x: 298, y: 58, w: 138, h: 242, dlX: 332, drX: 402, doorY: 298, corrY: 356, stairLX: 128, stairRX: 882 },
-      3: { x: 438, y: 58, w: 138, h: 242, dlX: 472, drX: 542, doorY: 298, corrY: 356, stairLX: 128, stairRX: 882 },
-      4: { x: 578, y: 58, w: 132, h: 242, dlX: 610, drX: 678, doorY: 298, corrY: 356, stairLX: 128, stairRX: 882 },
-      5: { x: 712, y: 58, w: 146, h: 242, dlX: 748, drX: 822, doorY: 298, corrY: 356, stairLX: 128, stairRX: 882 },
+      1: { x: 148, y: 58, w: 146, h: 246, dlX: 233, drX: 241, doorY: 306, corrY: 368, stairLX: 106, stairRX: 911, stairEntryY: 270 },
+      2: { x: 298, y: 58, w: 136, h: 246, dlX: 375, drX: 383, doorY: 306, corrY: 368, stairLX: 106, stairRX: 911, stairEntryY: 270 },
+      3: { x: 438, y: 58, w: 132, h: 246, dlX: 499, drX: 507, doorY: 306, corrY: 368, stairLX: 106, stairRX: 911, stairEntryY: 270 },
+      4: { x: 574, y: 58, w: 134, h: 246, dlX: 627, drX: 635, doorY: 306, corrY: 368, stairLX: 106, stairRX: 911, stairEntryY: 270 },
+      5: { x: 712, y: 58, w: 158, h: 246, dlX: 777, drX: 785, doorY: 306, corrY: 368, stairLX: 106, stairRX: 911, stairEntryY: 270 },
     },
     AB: {
-      1: { x: 150, y: 58, w: 242, h: 242, dlX: 210, drX: 330, doorY: 298, corrY: 360, stairLX: 128, stairRX: 882 },
-      2: { x: 394, y: 58, w: 224, h: 242, dlX: 450, drX: 560, doorY: 298, corrY: 360, stairLX: 128, stairRX: 882 },
-      3: { x: 620, y: 58, w: 240, h: 242, dlX: 680, drX: 795, doorY: 298, corrY: 360, stairLX: 128, stairRX: 882 },
+      1: { x: 150, y: 60, w: 244, h: 248, dlX: 282, drX: 290, doorY: 310, corrY: 374, stairLX: 108, stairRX: 911, stairEntryY: 274 },
+      2: { x: 400, y: 60, w: 220, h: 248, dlX: 504, drX: 512, doorY: 310, corrY: 374, stairLX: 108, stairRX: 911, stairEntryY: 274 },
+      3: { x: 626, y: 60, w: 244, h: 248, dlX: 734, drX: 742, doorY: 310, corrY: 374, stairLX: 108, stairRX: 911, stairEntryY: 274 },
     },
     LB: {
-      1: { x: 165, y: 48, w: 350, h: 212, dlX: 250, drX: 425, doorY: 258, corrY: 312, stairLX: 136, stairRX: 886 },
-      2: { x: 518, y: 48, w: 342, h: 212, dlX: 600, drX: 775, doorY: 258, corrY: 312, stairLX: 136, stairRX: 886 },
+      1: { x: 172, y: 50, w: 348, h: 250, dlX: 344, drX: 352, doorY: 302, corrY: 355, stairLX: 119, stairRX: 925, stairEntryY: 265 },
+      2: { x: 528, y: 50, w: 346, h: 250, dlX: 682, drX: 690, doorY: 302, corrY: 355, stairLX: 119, stairRX: 925, stairEntryY: 265 },
     }
   };
 
@@ -754,7 +780,7 @@ function renderBuildingFloors(bKey, snapshot) {
           stroke="#e2e8f0" stroke-width="4.5" stroke-linecap="round"/>
         <rect x="${cx - pillW / 2}" y="${cy - 10}" width="${pillW}" height="20" rx="4" fill="#0f172a" opacity="0.95"/>
         <text x="${cx}" y="${cy + 3.5}" text-anchor="middle" fill="#cbd5e1"
-          font-size="9.5" font-weight="800" font-family="'JetBrains Mono', monospace">${tagText}</text>
+          font-size="9.5" font-weight="800" font-family="'Atkinson Hyperlegible Mono', monospace">${tagText}</text>
       </g>
     `;
   }
@@ -793,10 +819,10 @@ function renderBuildingFloors(bKey, snapshot) {
 
     // 1. Check Unavailable Stairwells & Corridors (Always visible as Gray X)
     if (unavailSet.has(`${pCode}-STAIR-L`)) {
-      facilityOverlays += renderGrayX(74, 58, 66, firstBox.h, 'STAIR L · X', 84);
+      facilityOverlays += renderGrayX(stairLBox.x, stairLBox.y, stairLBox.w, stairLBox.h, 'STAIR L · X', 80);
     }
     if (unavailSet.has(`${pCode}-STAIR-R`)) {
-      facilityOverlays += renderGrayX(872, 58, 66, firstBox.h, 'STAIR R · X', 84);
+      facilityOverlays += renderGrayX(stairRBox.x, stairRBox.y, stairRBox.w, stairRBox.h, 'STAIR R · X', 80);
     }
 
     const wholeCorrUnavail = unavailRawSet.has(`${pCode}-CORRIDOR`);
@@ -860,7 +886,7 @@ function renderBuildingFloors(bKey, snapshot) {
               fill="${fillCol}" stroke="${strokeCol}" stroke-width="${isSelected ? 3.5 : 2}"/>
             <rect x="${box.x + 8}" y="${box.y + 8}" width="72" height="20" rx="4" fill="#0f172a" opacity="0.92"/>
             <text x="${box.x + 44}" y="${box.y + 22}" text-anchor="middle" fill="${tagCol}"
-              font-size="10" font-weight="800" font-family="'JetBrains Mono', monospace">${tagText}</text>
+              font-size="10" font-weight="800" font-family="'Atkinson Hyperlegible Mono', monospace">${tagText}</text>
           </g>
         `;
 
@@ -873,15 +899,17 @@ function renderBuildingFloors(bKey, snapshot) {
 
           const targetX = useLeft ? box.stairLX : box.stairRX;
           const doorX = rm?.door?.endsWith('-DL') ? box.dlX : rm?.door?.endsWith('-DR') ? box.drX : (useLeft ? box.dlX : box.drX);
-          const startX = box.x + (box.w / 2);
-          const startY = box.y + (box.h * 0.52);
-          const laneOffset = Math.round((r - (roomsPerFloor + 1) / 2) * 3.5);
+          const startX = Math.round(box.x + (box.w / 2));
+          const startY = Math.round(box.y + (box.h * 0.48));
+          const preDoorY = box.doorY - 38;
+          const laneOffset = Math.round((r - (roomsPerFloor + 1) / 2) * 7);
           const laneY = box.corrY + laneOffset;
+          const pathD = `M ${startX} ${startY} L ${doorX} ${preDoorY} L ${doorX} ${box.doorY} L ${doorX} ${laneY} L ${targetX} ${laneY} L ${targetX} ${box.stairEntryY}`;
 
           arrows += `
-            <path d="M ${startX} ${startY} L ${doorX} ${box.doorY} L ${doorX} ${laneY} L ${targetX} ${laneY}"
+            <path d="${pathD}"
               fill="none" stroke="#064e3b" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.45"/>
-            <path d="M ${startX} ${startY} L ${doorX} ${box.doorY} L ${doorX} ${laneY} L ${targetX} ${laneY}"
+            <path d="${pathD}"
               fill="none" stroke="#10b981" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"
               stroke-dasharray="10,6" marker-end="url(#arr-f-${bCode}-${f})">
               <animate attributeName="stroke-dashoffset" from="32" to="0" dur="0.85s" repeatCount="indefinite"/>
@@ -892,11 +920,11 @@ function renderBuildingFloors(bKey, snapshot) {
         roomOverlays += `
           <g id="box-${rmId}" style="cursor:pointer; pointer-events:all;" onclick="inspectRoomFromBlueprint('${rmId}')">
             <rect x="${box.x}" y="${box.y}" width="${box.w}" height="${box.h}" rx="4"
-              fill="${isSelected ? 'rgba(11, 87, 208, 0.20)' : 'rgba(255, 255, 255, 0.03)'}"
-              stroke="${isSelected ? '#3b82f6' : 'rgba(148, 163, 184, 0.25)'}" stroke-width="${isSelected ? 3 : 1}"/>
+              fill="${isSelected ? 'rgba(11, 92, 171, 0.18)' : 'rgba(255, 255, 255, 0.03)'}"
+              stroke="${isSelected ? '#0b5cab' : 'rgba(148, 163, 184, 0.25)'}" stroke-width="${isSelected ? 3 : 1}"/>
             <rect x="${box.x + 8}" y="${box.y + 8}" width="46" height="18" rx="4" fill="#0f172a" opacity="0.8"/>
             <text x="${box.x + 31}" y="${box.y + 21}" text-anchor="middle" fill="#cbd5e1"
-              font-size="10" font-weight="700" font-family="'JetBrains Mono', monospace">R${r}</text>
+              font-size="10" font-weight="700" font-family="'Atkinson Hyperlegible Mono', monospace">R${r}</text>
           </g>
         `;
       }
@@ -938,12 +966,12 @@ function renderBuildingFloors(bKey, snapshot) {
           <g>
             <rect x="${camLeftX}" y="${camLeftY}" width="${badgeW}" height="${badgeH}" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
             <circle cx="${camLeftX + 14}" cy="${camLeftY + badgeH / 2}" r="5" fill="${colLeft}"/>
-            <text x="${camLeftX + 25}" y="${camLeftY + badgeH / 2 + 4}" fill="#ffffff" font-size="10.5" font-weight="700" font-family="'JetBrains Mono', monospace">${didLeft}</text>
+            <text x="${camLeftX + 25}" y="${camLeftY + badgeH / 2 + 4}" fill="#ffffff" font-size="10.5" font-weight="700" font-family="'Atkinson Hyperlegible Mono', monospace">${didLeft}</text>
           </g>
           <g>
             <rect x="${camRightX}" y="${camRightY}" width="${badgeW}" height="${badgeH}" rx="6" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
             <circle cx="${camRightX + 14}" cy="${camRightY + badgeH / 2}" r="5" fill="${colRight}"/>
-            <text x="${camRightX + 25}" y="${camRightY + badgeH / 2 + 4}" fill="#ffffff" font-size="10.5" font-weight="700" font-family="'JetBrains Mono', monospace">${didRight}</text>
+            <text x="${camRightX + 25}" y="${camRightY + badgeH / 2 + 4}" fill="#ffffff" font-size="10.5" font-weight="700" font-family="'Atkinson Hyperlegible Mono', monospace">${didRight}</text>
           </g>
         </svg>
       </div>
@@ -1061,15 +1089,15 @@ function updateEventLog(snap) {
   if (resEl) {
     const hist = (appState.incidents || []).slice(0, 6);
     if (!hist.length) {
-      resEl.innerHTML = '<div style="font-size:11px; color:var(--c-muted);">No archived incidents yet.</div>';
+      resEl.innerHTML = '<div class="archive-note">No archived incidents yet.</div>';
     } else {
       resEl.innerHTML = hist.map(inc => {
         const isRes = inc.status === 'RESOLVED';
         return `
-          <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 8px; background:#fff; border:1px solid var(--c-border); border-radius:6px; font-size:11px;">
+          <div class="archive-row">
             <div>
-              <b>${inc.incident_id}</b> &middot; ${inc.root_location || 'Campus'}
-              ${inc.notes ? `<div style="color:var(--c-muted); font-size:10.5px;">${inc.notes}</div>` : ''}
+              <b>${inc.incident_id}</b> · ${inc.root_location || 'Campus'}
+              ${inc.notes ? `<div class="archive-note">${inc.notes}</div>` : ''}
             </div>
             <span class="badge ${isRes ? 'safe' : 'critical'}">${inc.status}</span>
           </div>
@@ -1136,12 +1164,12 @@ function renderCamGrid() {
           style="width:100%; height:156px; object-fit:cover; border-radius:8px; background:#000; display:block;">
         </video>
         <div class="cam-scores">
-          <div style="font-size:10.5px; font-weight:800; color:var(--c-navy); margin-bottom:4px; text-transform:uppercase;">3-Criteria AI Telemetry</div>
-          <div class="cam-score-row"><span>Threat Index</span><span class="cam-score-val threat">${clf.index?.toFixed(1) ?? '—'} / 100</span></div>
-          <div class="cam-score-row"><span>1. Object (&ge;60%)</span><span class="cam-score-val">${scores.object ?? clf.object ?? '—'}%</span></div>
-          <div class="cam-score-row"><span>2. Pose Keypoints</span><span class="cam-score-val">${scores.pose ?? clf.pose ?? '—'}%</span></div>
-          <div class="cam-score-row"><span>3. Acoustic RMS</span><span class="cam-score-val">${scores.acoustic ?? clf.acoustic ?? '—'}%</span></div>
-          <div class="cam-score-row"><span>Gatekeeper</span><span class="cam-score-val ${clf.verified ? 'threat' : ''}">${clf.verified ? 'VERIFIED' : 'UNVERIFIED'}</span></div>
+          <div class="cam-scores-title">Detection scores</div>
+          <div class="cam-score-row"><span>Threat score</span><span class="cam-score-val threat">${clf.index?.toFixed(1) ?? '—'} / 100</span></div>
+          <div class="cam-score-row"><span>Object (&ge;60%)</span><span class="cam-score-val">${scores.object ?? clf.object ?? '—'}%</span></div>
+          <div class="cam-score-row"><span>Pose</span><span class="cam-score-val">${scores.pose ?? clf.pose ?? '—'}%</span></div>
+          <div class="cam-score-row"><span>Sound</span><span class="cam-score-val">${scores.acoustic ?? clf.acoustic ?? '—'}%</span></div>
+          <div class="cam-score-row"><span>Verified</span><span class="cam-score-val ${clf.verified ? 'threat' : ''}">${clf.verified ? 'Yes' : 'No'}</span></div>
         </div>
       </div>
     ` : `
@@ -1303,15 +1331,21 @@ async function submitModalVideoUpload() {
       setText('crit-val-3', `Index: ${Number(data.threat_index || 0).toFixed(1)} / 100`);
 
       if (resBox) {
+        const boxCls = data.criteria_passed ? 'critical' : data.level === 'WARNING' ? 'warning' : 'safe';
+        const headline = data.criteria_passed
+          ? `Threat verified (${data.level}) — evacuation activated`
+          : data.level === 'WARNING'
+            ? 'Caution alert (WARNING) — monitor zone'
+            : `Standby — no threat detected (${data.level})`;
         resBox.style.display = 'block';
-        resBox.className = `scan-result-box ${data.criteria_passed ? 'critical' : 'safe'}`;
+        resBox.className = `scan-result-box ${boxCls}`;
         resBox.innerHTML = `
-          <div style="font-weight:800; margin-bottom:2px;">
-            ${data.criteria_passed ? `THREAT VERIFIED (${data.level}) — EVACUATION ACTIVATED` : `STANDBY — NO THREAT DETECTED (${data.level})`}
-            &middot; <span style="font-family:'JetBrains Mono',monospace;">${Number(data.scan_ms || 0).toFixed(0)}ms</span>
+          <div style="font-weight:700; margin-bottom:2px;">
+            ${headline}
+            &middot; <span style="font-family:'Atkinson Hyperlegible Mono',monospace;">${Number(data.scan_ms || 0).toFixed(0)}ms</span>
             ${data.early_exit ? ' &middot; Early-Exit' : ''}
           </div>
-          <div style="font-size:11px;">
+          <div style="font-size:12px;">
             Object ${Number(data.object_score || 0).toFixed(0)}% &middot; Pose ${Number(data.pose_score || 0).toFixed(0)}% &middot; Acoustic ${Number(data.acoustic_score || 0).toFixed(0)}%
             (${data.frames_analyzed || 0} keyframes)
           </div>
@@ -1319,12 +1353,13 @@ async function submitModalVideoUpload() {
       }
 
       await refresh();
-      toast(
-        data.criteria_passed
-          ? `THREAT VERIFIED on ${targetDev} in ${Number(data.scan_ms || 0).toFixed(0)}ms! Evacuation activated.`
-          : `No threat detected on ${targetDev} (${Number(data.scan_ms || 0).toFixed(0)}ms). System remains on Standby.`,
-        data.criteria_passed ? 'critical' : 'success'
-      );
+      const toastMsg = data.criteria_passed
+        ? `Threat verified on ${targetDev} in ${Number(data.scan_ms || 0).toFixed(0)}ms. Evacuation activated.`
+        : data.level === 'WARNING'
+          ? `Caution alert (WARNING) on ${targetDev} (${Number(data.scan_ms || 0).toFixed(0)}ms). Monitor zone.`
+          : `No threat detected on ${targetDev} (${Number(data.scan_ms || 0).toFixed(0)}ms). Campus remains clear.`;
+      const toastKind = data.criteria_passed ? 'critical' : data.level === 'WARNING' ? 'warning' : 'success';
+      toast(toastMsg, toastKind);
     } else {
       toast(`Scan error: ${data.detail || 'Inference failed'}`, 'error');
     }
@@ -1410,25 +1445,25 @@ function renderHardwareTwin() {
   const brokerOk = !!hw.broker_connected;
   const espOnline = !!dev.online;
 
-  // Topbar quick pill
+  // Topbar ESP32 status dot inside the ESP32 device nav pill
   const topBeacon = document.getElementById('topbar-esp-beacon');
-  const topText = document.getElementById('topbar-esp-text');
+  const hwTabBtn = document.getElementById('tab-btn-hardware');
   if (topBeacon) topBeacon.className = `status-beacon ${espOnline ? '' : 'warning'}`;
-  if (topText) topText.textContent = espOnline ? 'ESP32 ONLINE' : 'ESP32 STANDBY';
+  if (hwTabBtn) hwTabBtn.title = espOnline ? 'ESP32 online' : 'ESP32 standby';
 
   // Broker & Node badges
   const brokerBadge = document.getElementById('hw-broker-badge');
   const brokerDot = document.getElementById('hw-broker-dot');
   if (brokerBadge) brokerBadge.className = `badge ${brokerOk ? 'safe' : 'warning'}`;
   if (brokerDot) brokerDot.className = `status-beacon ${brokerOk ? '' : 'warning'}`;
-  setText('hw-broker-text', brokerOk ? `MQTT: ${hw.broker}:${hw.port}` : 'MQTT: Reconnecting (Local Twin Active)');
+  setText('hw-broker-text', brokerOk ? `MQTT: ${hw.broker}:${hw.port}` : 'MQTT: reconnecting');
 
   const nodeBadge = document.getElementById('hw-node-badge');
   const nodeDot = document.getElementById('hw-node-dot');
   if (nodeBadge) nodeBadge.className = `badge ${espOnline ? 'safe' : 'warning'}`;
   if (nodeDot) nodeDot.className = `status-beacon ${espOnline ? '' : 'warning'}`;
-  setText('hw-node-text', espOnline ? `Wokwi ${dev.device_id}: ONLINE` : `Wokwi ${dev.device_id}: Waiting Heartbeat`);
-  setText('hw-last-hb', dev.last_heartbeat ? `Last Heartbeat: ${dev.last_heartbeat}` : 'Heartbeat: start Wokwi sketch to connect');
+  setText('hw-node-text', espOnline ? `${dev.device_id}: online` : `${dev.device_id}: waiting`);
+  setText('hw-last-hb', dev.last_heartbeat ? `Last heartbeat: ${dev.last_heartbeat}` : 'Start Wokwi sketch to connect');
 
   // Virtual SSD1306 OLED & Buzzer
   setText('oled-link', espOnline ? '[LIVE]' : '[TWIN]');
@@ -1461,7 +1496,7 @@ function renderHardwareTwin() {
   if (ledStrip && Array.isArray(hw.leds)) {
     ledStrip.innerHTML = hw.leds.map((led, idx) => {
       const code = led.code || 'S';
-      const label = code === 'T' ? 'THREAT / BLOCKED' : code === 'H' ? 'HOLD / CAUTION' : 'SAFE / OPEN';
+      const label = code === 'T' ? 'Threat / blocked' : code === 'H' ? 'Hold / caution' : 'Safe / open';
       return `
         <div class="hw-led-node">
           <div class="hw-led-top">
@@ -1533,10 +1568,10 @@ function onLocatorBuildingChange() {
 
   const flSel = document.getElementById('loc-floor');
   const rmSel = document.getElementById('loc-room');
-  if (rmSel) rmSel.innerHTML = '<option value="">All Rooms on Floor</option>';
+  if (rmSel) rmSel.innerHTML = '<option value="">All rooms</option>';
 
   if (!bldg) {
-    if (flSel) flSel.innerHTML = '<option value="">Select Floor…</option>';
+    if (flSel) flSel.innerHTML = '<option value="">Floor</option>';
     switchMapView('campus');
     updateOccupantGuidance();
     return;
@@ -1544,7 +1579,7 @@ function onLocatorBuildingChange() {
 
   const maxFloors = bldg === 'LB' ? 2 : 4;
   if (flSel) {
-    let html = '<option value="">All Floors…</option>';
+    let html = '<option value="">All floors</option>';
     for (let f = 1; f <= maxFloors; f++) {
       html += `<option value="${f}">Floor ${f}</option>`;
     }
@@ -1562,7 +1597,7 @@ function onLocatorFloorChange() {
 
   const rmSel = document.getElementById('loc-room');
   if (rmSel) {
-    let html = '<option value="">All Rooms on Floor</option>';
+    let html = '<option value="">All rooms</option>';
     if (bldg && fl) {
       const rpf = bldg === 'TPB' ? 5 : bldg === 'AB' ? 3 : 2;
       for (let r = 1; r <= rpf; r++) {
@@ -1623,14 +1658,33 @@ function inspectRoomFromBlueprint(roomId) {
   updateOccupantGuidance();
 }
 
+function showResolvedThreatBanner(durationMs = 6000) {
+  appState.resolvedBannerUntil = Date.now() + durationMs;
+  if (appState.resolvedBannerTimer) {
+    clearTimeout(appState.resolvedBannerTimer);
+  }
+  appState.resolvedBannerTimer = setTimeout(() => {
+    appState.resolvedBannerTimer = null;
+    appState.resolvedBannerUntil = 0;
+    if (appState.snapshot) {
+      updatePublicThreatBar(appState.snapshot);
+    } else {
+      const bar = document.getElementById('public-threat-bar');
+      if (bar) bar.className = 'threat-loc-bar';
+    }
+  }, durationMs + 50);
+}
+
 function updatePublicThreatBar(snapshot) {
   const bar = document.getElementById('public-threat-bar');
   const beacon = document.getElementById('ptb-beacon');
+  const labelEl = document.getElementById('ptb-label');
   const zonesEl = document.getElementById('ptb-zones');
   const actEl = document.getElementById('ptb-action');
   if (!bar || !snapshot) return;
 
   const lvl = (snapshot.global_status || 'NORMAL').toUpperCase();
+  const prev = appState.prevGlobalStatus;
   const locs = snapshot.possible_threat_locations || [];
   const blocked = snapshot.blocked || [];
   const gatesBlocked = ['GATE-W', 'GATE-NE'].filter(g => blocked.includes(g));
@@ -1638,22 +1692,43 @@ function updatePublicThreatBar(snapshot) {
   bar.className = 'threat-loc-bar';
   beacon.className = 'status-beacon';
 
-  if (lvl === 'NORMAL') {
-    zonesEl.textContent = 'NONE — ALL CAMPUS ZONES CLEAR';
-    actEl.textContent = 'Click any building or room to inspect exit paths';
+  if (lvl === 'CRITICAL' || lvl === 'WARNING') {
+    appState.prevGlobalStatus = lvl;
+    appState.resolvedBannerUntil = 0;
+    if (appState.resolvedBannerTimer) {
+      clearTimeout(appState.resolvedBannerTimer);
+      appState.resolvedBannerTimer = null;
+    }
+
+    bar.classList.add('visible', lvl === 'CRITICAL' ? 'critical' : 'warning');
+    beacon.classList.add(lvl === 'CRITICAL' ? 'critical' : 'warning');
+    if (labelEl) labelEl.textContent = 'Threat location';
+
+    const displayLocs = [...new Set([...locs, ...gatesBlocked])];
+    zonesEl.textContent = displayLocs.length
+      ? `${displayLocs.join(', ')} — avoid area`
+      : 'Caution or gate override active';
+    actEl.textContent = lvl === 'CRITICAL'
+      ? 'Follow green arrows away from the threat'
+      : 'Use alternate open corridors and gates';
     return;
   }
 
-  bar.classList.add(lvl === 'CRITICAL' ? 'critical' : 'warning');
-  beacon.classList.add(lvl === 'CRITICAL' ? 'critical' : 'warning');
+  // Detect transition from active threat/warning back to normal on any screen
+  if (prev === 'CRITICAL' || prev === 'WARNING') {
+    if (Date.now() >= appState.resolvedBannerUntil) {
+      showResolvedThreatBanner(6000);
+    }
+  }
+  appState.prevGlobalStatus = 'NORMAL';
 
-  const displayLocs = [...new Set([...locs, ...gatesBlocked])];
-  zonesEl.textContent = displayLocs.length
-    ? `${displayLocs.join(', ')} (AVOID AREA)`
-    : 'Perimeter Caution / Override Active';
-  actEl.textContent = lvl === 'CRITICAL'
-    ? 'FOLLOW GREEN ARROWS AWAY FROM THREAT'
-    : 'Use Alternate Safe Corridors & Gates';
+  // Show apprehended / secured notice briefly, then hide bar completely
+  if (Date.now() < appState.resolvedBannerUntil) {
+    bar.classList.add('visible', 'resolved');
+    if (labelEl) labelEl.textContent = 'Threat apprehended';
+    zonesEl.textContent = 'Campus secured — all zones clear';
+    actEl.textContent = 'Returning to normal view';
+  }
 }
 
 function clearFloorLocation() {
@@ -1664,8 +1739,8 @@ function clearFloorLocation() {
   const fSel = document.getElementById('loc-floor');
   const rSel = document.getElementById('loc-room');
   if (bSel) bSel.value = '';
-  if (fSel) fSel.innerHTML = '<option value="">Select Floor…</option>';
-  if (rSel) rSel.innerHTML = '<option value="">All Rooms on Floor</option>';
+  if (fSel) fSel.innerHTML = '<option value="">Floor</option>';
+  if (rSel) rSel.innerHTML = '<option value="">All rooms</option>';
   switchMapView('campus');
   updateOccupantGuidance();
 }
@@ -1701,16 +1776,16 @@ function updateOccupantGuidance() {
 
   if (crit.length > 0) {
     cls = 'critical';
-    title = `${labelLoc}: DANGER — DO NOT ENTER AFFECTED ZONE`;
-    detail = `${crit.length} room(s) compromised. Stay sheltered or await first responders.`;
+    title = `${labelLoc}: danger, do not enter`;
+    detail = `${crit.length} room(s) affected. Stay sheltered or follow responder instructions.`;
   } else if (hold.length > 0 && safe.length === 0) {
     cls = 'warning';
-    title = `${labelLoc}: HOLD IN PLACE`;
-    detail = hold[0][1].reason || 'Descent route temporarily blocked. Await personnel guidance.';
+    title = `${labelLoc}: hold in place`;
+    detail = hold[0][1].reason || 'Stairway or corridor blocked. Wait for staff guidance.';
   } else if (unavail.length === targets.length) {
     cls = 'unavail';
-    title = `${labelLoc}: CLOSED / UNAVAILABLE FOR MAINTENANCE`;
-    detail = 'Facility personnel marked this area out of service (Gray X).';
+    title = `${labelLoc}: closed for maintenance`;
+    detail = 'Marked out of service by school personnel.';
   } else {
     cls = '';
     const gates = [...new Set(safe.map(([_, r]) => r.gate).filter(Boolean))].join(' or ');
@@ -1721,7 +1796,7 @@ function updateOccupantGuidance() {
       if (n.includes('STAIR-R')) stairSet.add('Right Stair');
     }));
     const stairsTxt = stairSet.size ? ` (${[...stairSet].join(' / ')})` : '';
-    title = `${labelLoc}: SAFE EGRESS AVAILABLE`;
+    title = `${labelLoc}: safe exit available`;
     detail = `Follow green arrows${doors}${stairsTxt} toward ${gates || 'nearest open exit gate'}.${unavail.length ? ` (${unavail.length} closed room(s) marked Gray X)` : ''}`;
   }
 
@@ -1729,10 +1804,10 @@ function updateOccupantGuidance() {
   box.className = `occupant-guidance-card ${cls}`;
   box.innerHTML = `
     <div>
-      <div style="font-size:13px; font-weight:800;">${title}</div>
-      <div style="font-size:11.5px; font-weight:500; opacity:0.95;">${detail}</div>
+      <div class="og-title">${title}</div>
+      <div class="og-detail">${detail}</div>
     </div>
-    <span class="badge ${cls === '' ? 'safe' : cls}">${safe.length}/${targets.length} Safe</span>
+    <span class="badge ${cls === '' ? 'safe' : cls}">${safe.length}/${targets.length} safe</span>
   `;
 }
 
@@ -1762,11 +1837,14 @@ async function checkAuthSession() {
 function applyAuthUI() {
   const role = appState.user?.role || 'public';
   document.body.setAttribute('data-auth', role);
-  setText('brand-mode-tag', appState.user ? `${role === 'IT_TECHNICIAN' ? 'IT ADMIN' : 'PERSONNEL'}` : 'CAMPUS EVACUATION MAP');
+  setText('brand-mode-tag', appState.user ? `${role === 'IT_TECHNICIAN' ? 'IT admin' : 'Personnel'}` : 'Evacuation map');
 
   if (appState.user) {
-    setText('user-role-badge', role === 'IT_TECHNICIAN' ? 'IT TECH' : 'PERSONNEL');
+    setText('user-role-badge', role === 'IT_TECHNICIAN' ? 'IT tech' : 'Personnel');
     setText('user-display-name', appState.user.full_name || appState.user.username);
+    appState.locBldg = '';
+    appState.locFloor = '';
+    appState.locRoom = '';
   } else {
     // Public view always remains strictly on Map & Blueprints
     if (appState.activeTab !== 'map') {
@@ -1897,7 +1975,11 @@ async function logoutUser() {
   appState.token = null;
   appState.user = null;
   localStorage.removeItem('sentinel_token');
+  const rmSel = document.getElementById('sb-room-select');
+  if (rmSel) rmSel.value = '';
+  const ins = document.getElementById('inspector-result');
+  if (ins) ins.style.display = 'none';
   applyAuthUI();
-  toast('Signed out — Switched to Public Map & Blueprints view', 'info');
+  toast('Signed out. Switched to public map view.', 'info');
   await refresh();
 }

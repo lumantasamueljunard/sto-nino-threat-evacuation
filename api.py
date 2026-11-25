@@ -528,6 +528,8 @@ async def set_scenario(req: ScenarioRequest, user: dict = Depends(require_staff)
     if req.scenario not in valid:
         raise HTTPException(status_code=400, detail=f"Unknown scenario. Valid: {valid}")
     _state["scenario"] = req.scenario
+    if req.scenario == "all_clear":
+        clear_detections()
     try:
         database.log_audit("SET_SCENARIO", f"{user['username']} ({user['role']})", {"scenario": req.scenario})
     except Exception:
@@ -608,8 +610,7 @@ async def resolve_incidents(req: ResolveIncidentRequest, user: dict = Depends(re
     _state["closed_edges"] = []
     _state["unavailable_gates"] = []
 
-    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "detections.json"), "w", encoding="utf-8") as f:
-        json.dump([], f)
+    clear_detections()
 
     resolved_count = 0
     actor = f"{user['username']} ({user['role']})"
@@ -658,7 +659,7 @@ async def simulate_threat(req: ThreatSimRequest, user: dict = Depends(require_st
     save_detections(current_records)
     _state["scenario"] = "all_clear"
     try:
-        database.log_audit("SIMULATE_THREAT", "OPERATOR", {"devices": req.device_ids, "classification": clf})
+        database.log_audit("SIMULATE_THREAT", f"{user['username']} ({user['role']})", {"devices": req.device_ids, "classification": clf})
     except Exception:
         pass
     _sync_hardware()
@@ -691,18 +692,19 @@ async def upload_video(
             str(save_path),
             device_id=dev_list[0],
             incident_id=incident_id,
-            sample_frames=10,
+            sample_frames=12,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Inference error: {str(e)}")
 
     clf = base_rec.get("classification", {})
     level = clf.get("level", "NORMAL")
-    passed = level in ("CRITICAL", "WARNING")
+    verified_critical = bool(clf.get("verified") and level == "CRITICAL")
+    has_alert = level in ("CRITICAL", "WARNING")
     breakdown = base_rec.get("criteria_breakdown", {})
     scan_ms = breakdown.get("scan_ms", 0.0)
 
-    if passed:
+    if has_alert:
         for did in dev_list:
             c_rec = dict(base_rec)
             c_rec["device_id"] = did
@@ -714,23 +716,32 @@ async def upload_video(
         _state["scenario"] = "all_clear"
         _sync_hardware()
 
+    actor = f"{user['username']} ({user['role']})"
     try:
-        database.log_audit("UPLOAD_VIDEO" if passed else "UPLOAD_VIDEO_STANDBY", "OPERATOR", {
+        audit_evt = "UPLOAD_VIDEO_CRITICAL" if verified_critical else "UPLOAD_VIDEO_WARNING" if has_alert else "UPLOAD_VIDEO_STANDBY"
+        database.log_audit(audit_evt, actor, {
             "devices": dev_list,
             "file": safe_name,
             "level": level,
             "threat_index": clf.get("index", 0.0),
             "scan_ms": scan_ms,
-            "evacuation_activated": passed,
+            "evacuation_activated": verified_critical,
         })
     except Exception:
         pass
+
+    if verified_critical:
+        msg = f"THREAT VERIFIED: CRITICAL (Index {clf.get('index', 0):.1f}/100 · {scan_ms:.0f}ms). Evacuation simulation active!"
+    elif level == "WARNING":
+        msg = f"CAUTION ALERT (WARNING · Index {clf.get('index', 0):.1f}/100 · {scan_ms:.0f}ms). Monitor zone — CRITICAL threshold not met."
+    else:
+        msg = f"Criteria Not Met: NORMAL (Index {clf.get('index', 0):.1f}/100 · {scan_ms:.0f}ms). Campus remains ALL CLEAR."
 
     return {
         "ok": True,
         "devices": dev_list,
         "device_id": dev_list[0],
-        "records_added": len(dev_list),
+        "records_added": len(dev_list) if has_alert else 0,
         "level": level,
         "threat_index": clf.get("index", 0.0),
         "object_score": base_rec.get("scores", {}).get("object", 0.0),
@@ -738,17 +749,13 @@ async def upload_video(
         "acoustic_score": base_rec.get("scores", {}).get("acoustic", 0.0),
         "supporting_signals": clf.get("supporting_signals", 0),
         "verified": clf.get("verified", False),
-        "criteria_passed": passed,
+        "criteria_passed": verified_critical,
         "criteria_breakdown": breakdown,
         "scan_ms": scan_ms,
         "frames_analyzed": base_rec.get("object_stats", {}).get("frames_analyzed", 0),
         "early_exit": base_rec.get("object_stats", {}).get("early_exit", False),
         "video_url": f"/videos-project/{save_path.name}",
-        "message": (
-            f"THREAT VERIFIED: {level} (Index {clf.get('index', 0):.1f}/100 · {scan_ms:.0f}ms). Evacuation simulation active!"
-            if passed
-            else f"Criteria Not Met: {level} (Index {clf.get('index', 0):.1f}/100 · {scan_ms:.0f}ms). Campus remains ALL CLEAR."
-        )
+        "message": msg,
     }
 
 
